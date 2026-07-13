@@ -1304,3 +1304,69 @@ tr.tok-detail-row.hidden {
   gap: 12px;
 }
 
+/* Token create form spacing */
+.token-create-panel .panel-title {
+  margin-bottom: 16px;
+}
+.form-row-token {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 16px 18px;
+  align-items: end;
+}
+.form-row-token .field label {
+  margin-bottom: 6px;
+}
+.token-create-actions {
+  margin-top: 18px;
+  gap: 12px;
+}
+
+/* Settings subnav jump chips */
+.settings-subnav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0 0 14px;
+  position: sticky;
+  top: 60px;
+  z-index: 5;
+  padding: 8px 0;
+  background: color-mix(in srgb, var(--color-bg-page) 92%, transparent);
+  backdrop-filter: blur(6px);
+}
+.settings-subnav-btn {
+  border: 1px solid var(--color-border-default);
+  background: var(--color-bg-surface);
+  color: var(--color-text-secondary);
+  border-radius: 999px;
+  min-height: 30px;
+  padding: 0 12px;
+  font-size: 12px;
+  cursor: pointer;
+}
+.settings-subnav-btn:hover,
+.settings-subnav-btn.is-active {
+  color: var(--color-text-primary);
+  background: var(--control);
+  border-color: color-mix(in srgb, var(--color-text-primary) 18%, var(--color-border-default));
+}
+.settings-section {
+  scroll-margin-top: 110px;
+}
+.panel-title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+.set-json-pre {
+  max-height: 360px;
+  overflow: auto;
+  margin: 0;
+}
+.set-json-pre.is-collapsed {
+  display: none;
+}
+

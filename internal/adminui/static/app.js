@@ -1,7 +1,6 @@
 /* 管理台前端：深浅色 + 令牌发放 + 仪表盘
  * - admin_key 仅存内存（变量 adminKey），绝不写入 localStorage / sessionStorage
  * - 主题偏好键：localStorage["pool-admin-theme"] = "dark" | "light"
- * - KPI 历史：localStorage["pool-admin-kpi-history"]（仅 success_rate/requests，供 sparkline）
  * - 无 HTML inline 事件；全部 addEventListener / 属性赋值（CSP script-src 'self'）
  * - 禁用 / 删除等危险操作以 toast 反馈，不弹 confirm
  */
@@ -13,9 +12,6 @@
   var dashBuilt = false;
   var pollTimer = null;
   var toastTimer = null;
-  var KPI_HISTORY_KEY = "pool-admin-kpi-history";
-  var KPI_HISTORY_MAX = 60; // 约 5 分钟（5s 轮询）
-
   // 账号列表游标分页状态（API: GET /admin/accounts?cursor=&limit=）
   var accPageSize = 50;
   var accCursor = "";          // 当前页请求 cursor（首页为空）
@@ -240,7 +236,7 @@
     if (page === "tokens") return renderTokens();
     if (page === "imports") return renderImportJobs();
     if (page === "settings") return renderSettings();
-    if (page === "config") return renderConfig();
+    if (page === "config") { location.hash = "#/settings"; return; }
     location.hash = "#/login";
     renderLogin();
   }
@@ -320,134 +316,18 @@
     return n.toFixed(i ? 1 : 0) + " " + u[i];
   }
 
-  function kpi(label, value) {
-    return '<div class="kpi"><div class="label">' + esc(label) +
-      '</div><div class="value">' + esc(String(value)) + "</div></div>";
-  }
-
-  /** 读取 KPI 历史（localStorage，失败则空数组） */
-  function loadKpiHistory() {
-    try {
-      var raw = localStorage.getItem(KPI_HISTORY_KEY);
-      if (!raw) return [];
-      var arr = JSON.parse(raw);
-      return Array.isArray(arr) ? arr : [];
-    } catch (_) {
-      return [];
-    }
-  }
-
-  /** 追加一次采样并截断 */
-  function pushKpiSample(successRate, requests) {
-    var hist = loadKpiHistory();
-    hist.push({
-      t: Date.now(),
-      success_rate: Number(successRate) || 0,
-      requests: Number(requests) || 0
-    });
-    if (hist.length > KPI_HISTORY_MAX) {
-      hist = hist.slice(hist.length - KPI_HISTORY_MAX);
-    }
-    try {
-      localStorage.setItem(KPI_HISTORY_KEY, JSON.stringify(hist));
-    } catch (_) { /* 配额满等 */ }
-    return hist;
-  }
-
-  /**
-   * 在 canvas 上画简易折线 sparkline（成功率 0–1）。
-   * 纯前端、无依赖；空数据时画基线。
-   */
-  function drawSparkline(canvas, hist) {
-    if (!canvas || !canvas.getContext) return;
-    var dpr = window.devicePixelRatio || 1;
-    var cssW = canvas.clientWidth || 240;
-    var cssH = canvas.clientHeight || 48;
-    canvas.width = Math.max(1, Math.floor(cssW * dpr));
-    canvas.height = Math.max(1, Math.floor(cssH * dpr));
-    var ctx = canvas.getContext("2d");
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    ctx.clearRect(0, 0, cssW, cssH);
-
-    var rates = (hist || []).map(function (p) {
-      var v = Number(p.success_rate);
-      if (!isFinite(v)) v = 0;
-      if (v < 0) v = 0;
-      if (v > 1) v = 1;
-      return v;
-    });
-    var theme = getComputedStyle(document.documentElement);
-    // 背景
-    ctx.fillStyle = theme.getPropertyValue("--bg-card").trim();
-    ctx.fillRect(0, 0, cssW, cssH);
-
-    // 参考线 100% / 50%
-    ctx.strokeStyle = theme.getPropertyValue("--border").trim();
-    ctx.lineWidth = 1;
-    ctx.beginPath();
-    ctx.moveTo(0, cssH * 0.15);
-    ctx.lineTo(cssW, cssH * 0.15);
-    ctx.moveTo(0, cssH * 0.5);
-    ctx.lineTo(cssW, cssH * 0.5);
-    ctx.stroke();
-
-    if (rates.length < 2) {
-      ctx.fillStyle = theme.getPropertyValue("--fg-muted").trim();
-      ctx.font = "11px ui-sans-serif, system-ui, sans-serif";
-      ctx.fillText("采样中…", 8, cssH / 2 + 4);
-      return;
-    }
-
-    var pad = 4;
-    var w = cssW - pad * 2;
-    var h = cssH - pad * 2;
-    var n = rates.length;
-    var muted = theme.getPropertyValue("--fg-muted").trim();
-    var success = theme.getPropertyValue("--success").trim();
-    var error = theme.getPropertyValue("--error").trim();
-    // 最近值决定线色：<0.95 用 error
-    var last = rates[n - 1];
-    var stroke = last >= 0.99 ? success : (last >= 0.95 ? muted : error);
-
-    ctx.beginPath();
-    for (var i = 0; i < n; i++) {
-      var x = pad + (w * i) / (n - 1);
-      // y：1 → 顶，0 → 底
-      var y = pad + h * (1 - rates[i]);
-      if (i === 0) ctx.moveTo(x, y);
-      else ctx.lineTo(x, y);
-    }
-    ctx.strokeStyle = stroke;
-    ctx.lineWidth = 1.75;
-    ctx.lineJoin = "round";
-    ctx.stroke();
-
-    // 终点圆点
-    var ex = pad + w;
-    var ey = pad + h * (1 - last);
-    ctx.beginPath();
-    ctx.arc(ex, ey, 2.5, 0, Math.PI * 2);
-    ctx.fillStyle = stroke;
-    ctx.fill();
-  }
-
   function renderDashboard() {
     setAuthed(true);
     if (!dashBuilt || !$("kpis")) {
       dashBuilt = true;
       $("main").innerHTML = wrapPage(
-        pageHd("仪表盘", "运行态与池容量一览（对齐 grok2api 统计卡片）",
+        pageHd("仪表盘", "运行态与池容量一览",
           '<button type="button" class="page-action-btn" id="dashRefresh">刷新</button>') +
         '<div id="dashErr"></div>' +
-        '<div id="kpis" class="stat-grid">' + skeletonStats(9) + "</div>" +
-        '<div class="spark-wrap">' +
-        '<div class="spark-head"><span>请求成功率</span><span class="muted" id="sparkMeta"></span></div>' +
-        '<canvas id="rateSpark" width="640" height="56" aria-label="成功率"></canvas>' +
-        '<p class="muted dashboard-note">本机采样 · localStorage · 约 5s/点</p></div>' +
+        '<div id="kpis" class="stat-grid">' + skeletonStats(8) + "</div>" +
         '<p class="muted dashboard-meta" id="dashMeta"></p>'
       );
       $("dashRefresh").addEventListener("click", function () { loadDash(true); });
-      drawSparkline($("rateSpark"), loadKpiHistory());
     }
     loadDash(false);
     stopPoll();
@@ -465,7 +345,6 @@
   function setStatGrid(items) {
     var host = $("kpis");
     if (!host) return;
-    // 稳定结构：只改 text，避免整表销毁
     if (host.children.length !== items.length) {
       host.innerHTML = items.map(function (it) {
         return '<div class="stat-cell"><div class="stat-label">' + esc(it[0]) +
@@ -490,11 +369,8 @@
   function loadDash(force) {
     if (document.visibilityState === "hidden" && !force) return;
     api("/admin/pool/stats").then(function (s) {
-      var rate = s.success_rate != null
-        ? (100 * Number(s.success_rate)).toFixed(1) + "%" : "—";
       setStatGrid([
         ["请求总数", s.requests_total != null ? s.requests_total : 0],
-        ["成功率", rate],
         ["热池", (s.pool_hot_size != null ? s.pool_hot_size : 0) + " / " + (s.hot_cap != null ? s.hot_cap : "—")],
         ["冷却", s.pool_cooldown_size != null ? s.pool_cooldown_size : 0],
         ["Inflight", s.proxy_inflight != null ? s.proxy_inflight : 0],
@@ -512,13 +388,6 @@
       if (ver && s.version) ver.textContent = String(s.version).indexOf("v") === 0 ? s.version : ("v" + s.version);
       var de = $("dashErr");
       if (de) de.innerHTML = "";
-      var hist = pushKpiSample(
-        s.success_rate != null ? s.success_rate : 1,
-        s.requests_total != null ? s.requests_total : 0
-      );
-      drawSparkline($("rateSpark"), hist);
-      var meta = $("sparkMeta");
-      if (meta) meta.textContent = hist.length + " 点 · " + rate;
     }).catch(function (e) {
       if (handleAuthError(e)) return;
       var de = $("dashErr");
@@ -664,19 +533,58 @@
   function renderSettings() {
     stopPoll();
     setAuthed(true);
+    var SECTIONS = [
+      { id: "sel", title: "选号 / 热池" },
+      { id: "lease", title: "租约 / 冷却" },
+      { id: "http", title: "进程 / HTTP" },
+      { id: "refresh", title: "Token 刷新" },
+      { id: "token", title: "令牌模板" },
+      { id: "import", title: "导入 / SSO" },
+      { id: "anthropic", title: "Anthropic" },
+      { id: "deploy", title: "部署 / 密钥" },
+      { id: "json", title: "JSON 快照" }
+    ];
+    var subnav = '<nav class="settings-subnav" aria-label="设置分组">' +
+      SECTIONS.map(function (s) {
+        return '<button type="button" class="settings-subnav-btn" data-jump="' + s.id + '">' +
+          esc(s.title) + "</button>";
+      }).join("") + "</nav>";
     $("main").innerHTML = wrapPage(
       pageHd("参数设计器", "全部运行参数均可在此编辑 · 热更新即时生效 · 密钥字段留空表示不修改",
         '<button type="button" class="page-action-btn" id="reloadSet">重新加载</button>' +
         '<button type="button" class="page-action-btn-primary" id="saveSet">保存并应用</button>') +
+      subnav +
       '<div id="setHint"></div>' +
       '<div id="setErr"></div>' +
       '<div id="setForm" class="panel-stack"></div>' +
-      '<div class="panel"><div class="panel-title">当前 JSON 快照</div>' +
-      '<pre id="setPreview" class="mono muted"></pre></div>'
+      '<div class="panel settings-section" id="set-sec-json">' +
+      '<div class="panel-title-row">' +
+      '<div class="panel-title">JSON 快照</div>' +
+      '<button type="button" class="btn btn-sm btn-secondary" id="toggleJson">收起</button></div>' +
+      '<pre id="setPreview" class="mono muted set-json-pre"></pre></div>'
     );
 
-    function section(title, note, fieldsHtml) {
-      return '<div class="panel settings-section">' +
+    document.querySelectorAll(".settings-subnav-btn").forEach(function (btn) {
+      btn.addEventListener("click", function () {
+        var id = btn.getAttribute("data-jump");
+        var el = $("set-sec-" + id);
+        if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
+        document.querySelectorAll(".settings-subnav-btn").forEach(function (b) {
+          b.classList.toggle("is-active", b === btn);
+        });
+      });
+    });
+    $("toggleJson").addEventListener("click", function () {
+      var pre = $("setPreview");
+      var btn = $("toggleJson");
+      if (!pre || !btn) return;
+      var hide = !pre.classList.contains("is-collapsed");
+      pre.classList.toggle("is-collapsed", hide);
+      btn.textContent = hide ? "展开" : "收起";
+    });
+
+    function section(id, title, note, fieldsHtml) {
+      return '<div class="panel settings-section" id="set-sec-' + id + '">' +
         '<div class="section-title panel-section-title">' + title + "</div>" +
         (note ? '<p class="muted panel-note">' + note + "</p>" : "") +
         '<div class="form-row form-row-dense">' + fieldsHtml + "</div></div>";
@@ -725,7 +633,7 @@
           }
         }
         var html = "";
-        html += section("选号 / 热池", "pow2 / sticky / 权重即时生效",
+        html += section("sel", "选号 / 热池", "pow2 / sticky / 权重即时生效",
           fieldSelect("策略", "sStrat", s.selector_strategy || "pow2_least_load", [
             { v: "pow2_least_load", l: "pow2_least_load" },
             { v: "sticky", l: "sticky" },
@@ -742,7 +650,7 @@
           field("权重·失败", "sWF", s.w_failure) +
           field("抖动幅度", "sJit", s.jitter_amp)
         );
-        html += section("租约 / 防封号冷却", "429 指数退避；401/402/403 冷却与隔离",
+        html += section("lease", "租约 / 防封号冷却", "429 指数退避；401/402/403 冷却与隔离",
           field("Lease failover 次数", "sAtt", s.max_attempts) +
           field("429 冷却基数秒", "sCB", s.cooldown_base_sec) +
           field("冷却上限秒", "sCC", s.cooldown_cap_sec) +
@@ -754,7 +662,7 @@
           field("403 冷却秒", "sC403", s.forbidden_cooldown_sec) +
           field("403 隔离阈值(0=关)", "sQ403", s.forbidden_quarantine_after)
         );
-        html += section("进程限制 / HTTP", "全局并发、Body、超时立即生效",
+        html += section("http", "进程限制 / HTTP", "全局并发、Body、超时立即生效",
           field("全局最大并发", "sGlob", s.max_concurrent) +
           field("最大 Body 字节", "sBody", s.max_body_bytes) +
           field("请求超时秒", "sTO", s.request_timeout_sec) +
@@ -763,18 +671,18 @@
             { v: "warn", l: "warn" }, { v: "error", l: "error" }
           ])
         );
-        html += section("Token 刷新 workers", "QPS / Skew 热更新",
+        html += section("refresh", "Token 刷新 workers", "QPS / Skew 热更新",
           field("Workers", "sRW", s.refresh_workers) +
           field("Refresh QPS", "sRQ", s.refresh_qps) +
           field("Skew 秒", "sRS", s.refresh_skew_sec)
         );
-        html += section("令牌创建默认模板", "仅影响管理台创建表单默认值",
+        html += section("token", "令牌创建默认模板", "仅影响管理台创建表单默认值",
           field("默认额度", "sTQ", s.token_default_remain_quota) +
           field("默认并发", "sTC", s.token_default_max_concurrent) +
           field("默认 RPM", "sTR", s.token_default_rpm) +
           fieldBool("默认无限额度", "sTU", !!s.token_default_unlimited)
         );
-        html += section("导入 / SSO 转换", "限制热更；填 SSO endpoint+key 可热重建转换器",
+        html += section("import", "导入 / SSO 转换", "限制热更；填 SSO endpoint+key 可热重建转换器",
           fieldBool("启用导入", "sImpEn", !!s.import_enabled) +
           field("最大上传字节", "sImpUp", s.import_max_upload_bytes) +
           field("最大条目(默认1万)", "sImpEnt", s.import_max_entries) +
@@ -792,14 +700,14 @@
           field("SSO workers", "sSsoW", s.import_sso_workers) +
           fieldBool("SSO allow_insecure", "sSsoInsec", !!s.import_sso_allow_insecure)
         );
-        html += section("Anthropic / 模型别名", "别名每行：claude-sonnet-4 = grok-4.5",
+        html += section("anthropic", "Anthropic / 模型别名", "别名每行：claude-sonnet-4 = grok-4.5",
           fieldBool("启用 Anthropic", "sAnEn", !!s.anthropic_enabled) +
           fieldBool("剥离未知 betas", "sAnStrip", !!s.anthropic_strip_unknown_betas) +
           fieldBool("count_tokens", "sAnCnt", !!s.anthropic_count_tokens) +
           fieldText("透传前缀(逗号分隔)", "sAnPre", prefixesToText(s.anthropic_passthrough_prefixes), "grok-") +
           fieldArea("模型别名映射", "sAnMap", aliasesToText(s.anthropic_model_aliases), 10)
         );
-        html += section("部署 / 上游 / 密钥", "listen/data_dir/mock 等保存后可能需重启；密钥留空不改",
+        html += section("deploy", "部署 / 上游 / 密钥", "listen/data_dir/mock 等保存后可能需重启；密钥留空不改",
           fieldText("Listen", "sListen", s.listen || "") +
           fieldBool("Allow public listen", "sPub", !!s.allow_public_listen) +
           fieldText("Data dir", "sData", s.data_dir || "") +
@@ -942,17 +850,16 @@
     var defU = d.token_default_unlimited ? "1" : "0";
     $("main").innerHTML = wrapPage(
       pageHd("令牌", "new-api 风格 · 可展开查看密钥 · 支持批量复制", "") +
-      '<div class="panel"><div class="panel-title">快速创建</div>' +
-      '<p class="muted" style="margin-bottom:12px">默认值来自「参数」页模板，可覆盖。创建后可在列表展开详情再次查看密钥。</p>' +
-      '<div class="form-row">' +
-      '<div><label for="tName">名称</label><input id="tName" class="input" value="client" /></div>' +
-      '<div><label for="tCount">数量 (1-100)</label><input id="tCount" class="input" type="number" value="1" min="1" max="100" /></div>' +
-      '<div><label for="tQuota">剩余额度</label><input id="tQuota" class="input" type="number" value="' + defQ + '" /></div>' +
-      '<div><label for="tUnlim">无限额度</label><select id="tUnlim" class="input"><option value="0"' + (defU === "0" ? " selected" : "") + '>否</option><option value="1"' + (defU === "1" ? " selected" : "") + '>是</option></select></div>' +
-      '<div><label for="tConc">令牌并发上限 (0=不限)</label><input id="tConc" class="input" type="number" value="' + defC + '" min="0" /></div>' +
-      '<div><label for="tRpm">RPM (0=不限)</label><input id="tRpm" class="input" type="number" value="' + defR + '" min="0" /></div>' +
+      '<div class="panel token-create-panel"><div class="panel-title">快速创建</div>' +
+      '<div class="form-row form-row-token">' +
+      '<div class="field"><label for="tName">名称</label><input id="tName" class="input" value="client" /></div>' +
+      '<div class="field"><label for="tCount">数量 (1-100)</label><input id="tCount" class="input" type="number" value="1" min="1" max="100" /></div>' +
+      '<div class="field"><label for="tQuota">剩余额度</label><input id="tQuota" class="input" type="number" value="' + defQ + '" /></div>' +
+      '<div class="field"><label for="tUnlim">无限额度</label><select id="tUnlim" class="input"><option value="0"' + (defU === "0" ? " selected" : "") + '>否</option><option value="1"' + (defU === "1" ? " selected" : "") + '>是</option></select></div>' +
+      '<div class="field"><label for="tConc">令牌并发上限 (0=不限)</label><input id="tConc" class="input" type="number" value="' + defC + '" min="0" /></div>' +
+      '<div class="field"><label for="tRpm">RPM (0=不限)</label><input id="tRpm" class="input" type="number" value="' + defR + '" min="0" /></div>' +
       "</div>" +
-      '<div class="toolbar" style="margin-top:12px">' +
+      '<div class="toolbar token-create-actions">' +
       '<button class="btn btn-primary" id="createBtn" type="button">创建并复制密钥</button>' +
       '<button class="page-action-btn" id="tokRefresh" type="button">刷新列表</button></div>' +
       '<div id="onceBox"></div></div>' +
@@ -1669,30 +1576,7 @@
 
 
   function renderConfig() {
-    stopPoll();
-    setAuthed(true);
-    $("main").innerHTML = wrapPage(
-      pageHd("系统配置", "只读安全视图 · 可编辑参数请到「设置」参数设计器",
-        '<button type="button" class="page-action-btn" id="cfgToSet">打开参数设计器</button>' +
-        '<button type="button" class="page-action-btn" id="cfgRefresh">刷新</button>') +
-      '<div class="panel"><pre id="cfg" class="mono">加载中…</pre></div>'
-    );
-    function load() {
-      Promise.all([api("/admin/config"), api("/admin/settings")]).then(function (arr) {
-        var c = arr[0] || {};
-        var s = arr[1] || {};
-        var pre = $("cfg");
-        if (pre) pre.textContent = JSON.stringify({ config: c, settings: s }, null, 2);
-      }).catch(function (e) {
-        if (handleAuthError(e)) return;
-        var pre = $("cfg");
-        if (pre) pre.textContent = "加载失败：" + (e.message || "");
-        toast(e.message, false);
-      });
-    }
-    $("cfgRefresh").addEventListener("click", load);
-    $("cfgToSet").addEventListener("click", function () { location.hash = "#/settings"; });
-    load();
+    location.hash = "#/settings";
   }
 
   function esc(s) {
