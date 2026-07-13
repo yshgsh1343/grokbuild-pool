@@ -249,12 +249,15 @@ func (m *Manager) releaseSuccess(lease Lease, now int64) error {
 	used := now
 	zero := 0
 	sc := 1
-	// 合并已有 success_count（读失败时仍记 1，不阻断 release）
+	fc := 0
+	// 合并已有 success_count；成功时衰减 failure_count（防“记仇太久”）
 	if cur, err := m.cat.Get(lease.AccountID); err == nil {
 		sc = cur.SuccessCount + 1
+		fc = decayFailureCount(cur.FailureCount)
 	}
 	patch := catalog.HealthPatch{
 		SuccessCount:            &sc,
+		FailureCount:            &fc,
 		LastSuccessAt:           &used,
 		LastUsedAt:              &used,
 		ConsecutiveUnauthorized: &zero,
@@ -266,7 +269,22 @@ func (m *Manager) releaseSuccess(lease Lease, now int64) error {
 		}
 		return fmt.Errorf("lease: patch success %s: %w", lease.AccountID, err)
 	}
+	// 同步热池 FailureScore，使 selector 立即减轻惩罚
+	if meta, ok := m.idx.Get(lease.AccountID); ok {
+		meta.FailureScore = float32(fc)
+		_, _ = m.idx.Promote(meta)
+	}
 	return nil
+}
+
+// decayFailureCount 成功请求后的失败分衰减：先减 1，再对剩余折半（下限 0）。
+// 例：10→4，5→2，1→0，0→0。比单纯 -1 恢复更快，又不会一次清零历史。
+func decayFailureCount(fc int) int {
+	if fc <= 0 {
+		return 0
+	}
+	fc--
+	return fc / 2
 }
 
 func (m *Manager) releaseFailure(lease Lease, result Result, now int64) error {

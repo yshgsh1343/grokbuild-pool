@@ -85,13 +85,14 @@ func serveHTTP(cfg config.Config, pool *poolStack, up *upstreamStack, adm *admin
 
 	srv := httpserver.NewServer(cfg.Listen, handler, cfg.RequestTimeout())
 
-	stopGauges := make(chan struct{})
+	stopBG := make(chan struct{})
+	// 指标 ticker（2s）
 	go func() {
 		t := time.NewTicker(2 * time.Second)
 		defer t.Stop()
 		for {
 			select {
-			case <-stopGauges:
+			case <-stopBG:
 				return
 			case <-t.C:
 				s := pool.Hot.Stats(0)
@@ -101,6 +102,25 @@ func serveHTTP(cfg config.Config, pool *poolStack, up *upstreamStack, adm *admin
 				if st, err := pool.Catalog.Stats(); err == nil {
 					metrics.SetQuarantineCount(st.QuarantineCount)
 				}
+			}
+		}
+	}()
+	// 热池周期重建：测活/启停/冷却变化同步进可调度集合（默认 60s）
+	go func() {
+		const hotReloadEvery = 60 * time.Second
+		t := time.NewTicker(hotReloadEvery)
+		defer t.Stop()
+		for {
+			select {
+			case <-stopBG:
+				return
+			case <-t.C:
+				n, err := pool.Hot.LoadEligible(pool.Catalog)
+				if err != nil {
+					logger.Warn("hot_reload_failed", "error", err)
+					continue
+				}
+				logger.Info("hot_reload_ok", "loaded", n, "cap", pool.Hot.Cap())
 			}
 		}
 	}()
@@ -133,7 +153,7 @@ func serveHTTP(cfg config.Config, pool *poolStack, up *upstreamStack, adm *admin
 		}
 	}
 
-	close(stopGauges)
+	close(stopBG)
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 	if err := srv.Shutdown(ctx); err != nil {
