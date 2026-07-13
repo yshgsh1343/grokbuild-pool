@@ -11,8 +11,8 @@ services:
       ADMIN_KEY: "${ADMIN_KEY:-}"
       # 可选：静态客户端 API Key；为空则依赖管理台发放的 sk- 令牌
       API_KEY: "${API_KEY:-}"
-      # 必填：真实上游 base_url（直接反代；内置 mock 已移除）
-      UPSTREAM_BASE_URL: "${UPSTREAM_BASE_URL:?set UPSTREAM_BASE_URL to your upstream /v1 base}"
+      # 可选：覆盖默认上游（默认 https://cli-chat-proxy.grok.com/v1）
+      UPSTREAM_BASE_URL: "${UPSTREAM_BASE_URL:-}"
       LISTEN: "0.0.0.0:8080"
       ALLOW_PUBLIC_LISTEN: "true"
       HOT_SIZE: "${HOT_SIZE:-3000}"

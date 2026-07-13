@@ -27,10 +27,13 @@ type upstreamStack struct {
 }
 
 // wireUpstream 管线第 3 步：真实上游反代 → refresh → executor（含按账号代理出站）。
-// 不再内置 mock 上游；启动前须配置 upstream.base_url。
+// 默认直连 cli-chat-proxy.grok.com；可用配置覆盖 base_url。
 func wireUpstream(cfg config.Config, opts Options, pool *poolStack, logger *slog.Logger) *upstreamStack {
 	_ = opts
 	base := strings.TrimSpace(cfg.Upstream.BaseURL)
+	if base == "" {
+		base = config.DefaultUpstreamBaseURL
+	}
 	uc := upstream.NewClient(upstream.Config{
 		BaseURL:          base,
 		ClientVersion:    cfg.Upstream.ClientVersion,
@@ -84,7 +87,7 @@ func wireUpstream(cfg config.Config, opts Options, pool *poolStack, logger *slog
 	}
 
 	outboundFactory := outbound.NewFactory(upstream.Config{
-		BaseURL:          cfg.Upstream.BaseURL,
+		BaseURL:          base,
 		ClientVersion:    cfg.Upstream.ClientVersion,
 		ClientIdentifier: cfg.Upstream.ClientIdentifier,
 		UserAgent:        cfg.Upstream.UserAgent,

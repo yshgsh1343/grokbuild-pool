@@ -45,6 +45,9 @@ const (
 	DefaultImportStagingStaleSec    = 24 * 60 * 60
 	// MaxImportUploadBytes 为显式体积上限的硬顶（2 GiB）；0 仍表示不限。
 	MaxImportUploadBytes = 2 << 30
+	// DefaultUpstreamBaseURL 默认直连 Grok Build CLI chat 代理。
+	DefaultUpstreamBaseURL = "https://cli-chat-proxy.grok.com/v1"
+
 )
 
 // Config 为 pool-proxy 的根运行时配置。
@@ -87,7 +90,7 @@ type OAuthConfig struct {
 
 // UpstreamConfig 控制如何向上游 Grok 发请求（直接反代）。
 type UpstreamConfig struct {
-	// BaseURL 为含 /v1 的上游基址（必填），例如 https://cli-chat-proxy.grok.com/v1。
+	// BaseURL 为含 /v1 的上游基址；空则回落 DefaultUpstreamBaseURL（cli-chat-proxy.grok.com）。
 	BaseURL          string `yaml:"base_url"`
 	ClientVersion    string `yaml:"client_version"`
 	ClientIdentifier string `yaml:"client_identifier"`
@@ -176,8 +179,8 @@ func Default() Config {
 		AdminKey:          "",
 		HotSize:           DefaultHotSize,
 		Upstream: UpstreamConfig{
-				// 必须显式配置真实上游；空值在 Validate 中拒绝。
-			BaseURL:          "",
+			// 默认直连 Grok；可用 upstream.base_url / UPSTREAM_BASE_URL 覆盖
+			BaseURL:          DefaultUpstreamBaseURL,
 			ClientVersion:    "0.2.93",
 			ClientIdentifier: "grok-pager",
 			UserAgent:        "grok-pager/0.2.93 grok-shell/0.2.93 (linux; x86_64)",
@@ -395,6 +398,12 @@ func (c *Config) applyDefaults() {
 	if c.Anthropic.PassthroughPrefixes == nil {
 		c.Anthropic.PassthroughPrefixes = append([]string(nil), d.Anthropic.PassthroughPrefixes...)
 	}
+	if strings.TrimSpace(c.Upstream.BaseURL) == "" {
+		c.Upstream.BaseURL = d.Upstream.BaseURL
+		if strings.TrimSpace(c.Upstream.BaseURL) == "" {
+			c.Upstream.BaseURL = DefaultUpstreamBaseURL
+		}
+	}
 	if c.Upstream.ClientVersion == "" {
 		c.Upstream.ClientVersion = d.Upstream.ClientVersion
 	}
@@ -416,9 +425,6 @@ func (c *Config) applyDefaults() {
 func (c Config) Validate() error {
 	if err := c.ValidateListen(c.Listen); err != nil {
 		return err
-	}
-	if strings.TrimSpace(c.Upstream.BaseURL) == "" {
-		return fmt.Errorf("config: upstream.base_url is required (direct reverse-proxy; mock upstream removed)")
 	}
 	adminKey := strings.TrimSpace(c.AdminKey)
 	if isPlaceholderAdminKey(adminKey) {

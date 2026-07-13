@@ -5,7 +5,7 @@
 //	config → pool → upstream → admin → http
 //
 // 默认监听：0.0.0.0:8080（Docker / 自托管）。
-// 须配置真实 upstream.base_url，进程直接反代上游（无内置 mock）。
+// 默认反代 cli-chat-proxy.grok.com；可用 upstream.base_url / UPSTREAM_BASE_URL 覆盖。
 package main
 
 import (

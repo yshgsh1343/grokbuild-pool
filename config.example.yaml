@@ -24,7 +24,7 @@ admin_key: "local-dev-admin-key-not-for-prod"
 hot_size: 3000
 
 upstream:
-  # 必填：直接反代的真实上游 base_url（含 /v1）
+  # 默认直连 Grok Build CLI 代理；留空或省略等同该地址
   base_url: "https://cli-chat-proxy.grok.com/v1"
   client_version: "0.2.93"
   client_identifier: "grok-pager"
