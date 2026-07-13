@@ -103,7 +103,6 @@ Anthropic 兼容（Claude Code 等）走 `/v1/messages`，同样带 API Key。
 需要 Go 1.26+：
 
 ```bash
-make test
 make build
 ./bin/pool-proxy --config config.example.yaml
 ```

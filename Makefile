@@ -1,11 +1,8 @@
-.PHONY: test build docker clean
+.PHONY: build docker clean
 
 GO ?= go
 BIN := bin
 IMAGE ?= grokbuild2api:latest
-
-test:
-	$(GO) test ./...
 
 build:
 	@mkdir -p $(BIN)
