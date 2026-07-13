@@ -61,8 +61,8 @@ type Config struct {
 	// HotSize 为热索引容量（默认 3000）。
 	HotSize int `yaml:"hot_size"`
 
-	// MockUpstream 强制使用内置 mock Grok /v1/responses 服务。
-	// Upstream.BaseURL 为空时同样启用。
+	// MockUpstream 已废弃：进程始终反代真实 upstream.base_url。
+	// 字段仍解析 YAML 以兼容旧配置，但启动时会被忽略。
 	MockUpstream bool `yaml:"mock_upstream"`
 
 	Upstream UpstreamConfig `yaml:"upstream"`
@@ -89,10 +89,9 @@ type OAuthConfig struct {
 	StatusPath string `yaml:"status_path"`
 }
 
-// UpstreamConfig 控制如何向上游 Grok（或 mock）发请求。
+// UpstreamConfig 控制如何向上游 Grok 发请求（直接反代）。
 type UpstreamConfig struct {
-	// BaseURL 为含 /v1 的 Grok CLI chat 代理基址。
-	// 为空（或 mock_upstream=true）时选用内置 mock。
+	// BaseURL 为含 /v1 的上游基址（必填），例如 https://cli-chat-proxy.grok.com/v1。
 	BaseURL          string `yaml:"base_url"`
 	ClientVersion    string `yaml:"client_version"`
 	ClientIdentifier string `yaml:"client_identifier"`
@@ -423,6 +422,9 @@ func (c Config) Validate() error {
 	if err := c.ValidateListen(c.Listen); err != nil {
 		return err
 	}
+	if strings.TrimSpace(c.Upstream.BaseURL) == "" {
+		return fmt.Errorf("config: upstream.base_url is required (direct reverse-proxy; mock upstream removed)")
+	}
 	adminKey := strings.TrimSpace(c.AdminKey)
 	if isPlaceholderAdminKey(adminKey) {
 		return fmt.Errorf("config: refusing placeholder admin_key")
@@ -541,12 +543,10 @@ func (c Config) RequestTimeout() time.Duration {
 	return time.Duration(sec) * time.Second
 }
 
-// UseMockUpstream 报告进程是否应启动内置 mock。
+// UseMockUpstream 始终 false：内置 mock 上游已移除，仅反代真实 upstream.base_url。
+// 保留方法以兼容旧调用点（admin 快照等）。
 func (c Config) UseMockUpstream() bool {
-	if c.MockUpstream {
-		return true
-	}
-	return strings.TrimSpace(c.Upstream.BaseURL) == ""
+	return false
 }
 
 // ResolveDBPath 选择 catalog SQLite 文件。

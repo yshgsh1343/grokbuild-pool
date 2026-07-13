@@ -5,6 +5,7 @@
 //	config → pool → upstream → admin → http
 //
 // 默认监听：0.0.0.0:8080（Docker / 自托管）。
+// 须配置真实 upstream.base_url，进程直接反代上游（无内置 mock）。
 package main
 
 import (
@@ -20,9 +21,6 @@ var version = "0.1.0-m11"
 func main() {
 	configPath := flag.String("config", "", "path to config.yaml (optional; defaults apply)")
 	showVersion := flag.Bool("version", false, "print version and exit")
-	mockUpstream := flag.Bool("mock-upstream", false, "force internal mock Grok upstream (no real network)")
-	mockFailHalf := flag.Bool("mock-fail-half", false, "mock: 429 for half of tokens by hash (M11 G5)")
-	mockStreamDelayMS := flag.Int("mock-stream-delay-ms", 0, "mock: delay each SSE chunk by N ms (G4 hold-open)")
 	listenOverride := flag.String("listen", "", "override listen address (default 0.0.0.0:8080)")
 	dbPathOverride := flag.String("db", "", "override catalog sqlite path")
 	dataDirOverride := flag.String("data-dir", "", "override data_dir")
@@ -34,13 +32,10 @@ func main() {
 	}
 
 	app.Run(app.Options{
-		Version:           version,
-		ConfigPath:        *configPath,
-		Listen:            *listenOverride,
-		DataDir:           *dataDirOverride,
-		DBPath:            *dbPathOverride,
-		MockUpstream:      *mockUpstream,
-		MockFailHalf:      *mockFailHalf,
-		MockStreamDelayMS: *mockStreamDelayMS,
+		Version:    version,
+		ConfigPath: *configPath,
+		Listen:     *listenOverride,
+		DataDir:    *dataDirOverride,
+		DBPath:     *dbPathOverride,
 	})
 }

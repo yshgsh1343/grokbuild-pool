@@ -233,13 +233,12 @@ export function renderSettings() {
         fieldText("透传前缀(逗号分隔)", "sAnPre", prefixesToText(s.anthropic_passthrough_prefixes), "grok-") +
         fieldArea("模型别名映射", "sAnMap", aliasesToText(s.anthropic_model_aliases), 10)
       );
-      html += section("deploy", "部署 / 上游 / 密钥", "listen/data_dir/mock/upstream 等保存后仅落盘，需手动重启进程；密钥留空不改",
+      html += section("deploy", "部署 / 上游 / 密钥", "listen/data_dir/upstream 等保存后仅落盘，需手动重启进程；始终反代真实 upstream；密钥留空不改",
         fieldText("Listen", "sListen", s.listen || "") +
         fieldBool("Allow public listen", "sPub", !!s.allow_public_listen) +
         fieldText("Data dir", "sData", s.data_dir || "") +
         fieldText("DB path", "sDB", s.db_path || "") +
-        fieldBool("Mock upstream", "sMock", !!s.mock_upstream) +
-        fieldText("Upstream base URL", "sUp", s.upstream_base_url || "", "https://…/v1") +
+        fieldText("Upstream base URL（需重启）", "sUp", s.upstream_base_url || "", "https://…/v1") +
         fieldText("OAuth refresh URL", "sOAuth", s.oauth_refresh_url || "") +
         fieldText("OAuth client_id", "sOAuthCID", s.oauth_client_id || "") +
         fieldText("API Key(留空不改)", "sApiKey", "", s.api_key_configured ? "已配置" : "未配置") +
@@ -332,7 +331,6 @@ export function renderSettings() {
       allow_public_listen: bool("sPub"),
       data_dir: str("sData"),
       db_path: str("sDB"),
-      mock_upstream: bool("sMock"),
       upstream_base_url: str("sUp"),
       oauth_refresh_url: str("sOAuth"),
       oauth_client_id: str("sOAuthCID")

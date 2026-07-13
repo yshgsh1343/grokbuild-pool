@@ -33,10 +33,8 @@ func loadConfig(opts Options, logger *slog.Logger) config.Config {
 		cfg = config.Default()
 	}
 
-	if opts.MockUpstream {
-		cfg.MockUpstream = true
-		cfg.Upstream.BaseURL = ""
-	}
+	// 强制走真实上游：忽略遗留 mock_upstream / 空 base_url 的 mock 语义
+	cfg.MockUpstream = false
 	if v := strings.TrimSpace(opts.Listen); v != "" {
 		cfg.Listen = v
 	}

@@ -14,7 +14,7 @@ db_path: ""
 
 # 静态客户端 API Key（可选）。为空时：
 # - 若 tokens.db 有发放令牌，则按令牌鉴权
-# - 否则本地 mock 可放行
+# - 都未配置时本地可放行（生产请配置令牌或 API_KEY）
 api_key: ""
 
 # 管理台密钥。公网监听时必须设置强随机值，禁止使用占位符
@@ -23,13 +23,12 @@ admin_key: "local-dev-admin-key-not-for-prod"
 # 热池目标容量
 hot_size: 3000
 
-# true 或 upstream.base_url 为空 → 使用内置 mock 上游（不访问真实 Grok）
-mock_upstream: true
+# mock_upstream 已废弃（保留字段兼容旧配置，启动时忽略）
+mock_upstream: false
 
 upstream:
-  # 真实上游示例：
-  # base_url: "https://cli-chat-proxy.grok.com/v1"
-  base_url: ""
+  # 必填：直接反代的真实上游 base_url（含 /v1）
+  base_url: "https://cli-chat-proxy.grok.com/v1"
   client_version: "0.2.93"
   client_identifier: "grok-pager"
   user_agent: "grok-pager/0.2.93 grok-shell/0.2.93 (linux; x86_64)"
@@ -38,7 +37,7 @@ upstream:
 # OAuth 刷新脚手架。真实请求需同时满足：
 #   1) 环境变量 POOL_OAUTH_ENABLED=1
 #   2) status_path 指向的 STATUS 中 UNLOCK_M12=true
-# mock_upstream=true 时始终用 MockOAuth
+# 真实 OAuth 刷新仍受 POOL_OAUTH_ENABLED + UNLOCK_M12 门控
 oauth:
   refresh_url: ""
   client_id: ""

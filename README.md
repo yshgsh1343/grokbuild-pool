@@ -25,7 +25,7 @@ cd grokbuild-pool
 
 ```bash
 export ADMIN_KEY="$(openssl rand -hex 24)"
-export MOCK_UPSTREAM=true   # 先用内置 mock 冒烟；接真实上游时改为 false
+export UPSTREAM_BASE_URL="https://cli-chat-proxy.grok.com/v1"  # 必填：真实上游
 
 docker compose up -d --build
 ```
@@ -58,8 +58,7 @@ docker compose exec pool-proxy poolctl prove --count 1000 --data-dir /data
 |------|------|------|
 | `ADMIN_KEY` | 管理台密钥（**必改**） | 示例占位，生产务必替换 |
 | `API_KEY` | 静态客户端 Key；空则依赖管理台发放的 `sk-` 令牌 | 空 |
-| `MOCK_UPSTREAM` | `true` 使用内置 mock 上游 | `true` |
-| `UPSTREAM_BASE_URL` | 真实上游 Base URL | 空 |
+| `UPSTREAM_BASE_URL` | 真实上游 Base URL（**必填**，直接反代） | 无默认，必须设置 |
 | `LISTEN` | 监听地址 | `0.0.0.0:8080` |
 | `HOT_SIZE` | 热池容量 | `3000` |
 | `MAX_CONCURRENT` | 全局并发硬上限 | `120` |
@@ -69,7 +68,6 @@ docker compose exec pool-proxy poolctl prove --count 1000 --data-dir /data
 
 ```bash
 export ADMIN_KEY=你的强随机密钥
-export MOCK_UPSTREAM=false
 export UPSTREAM_BASE_URL="https://你的上游/v1"
 docker compose up -d --build
 ```
@@ -143,7 +141,7 @@ config.example.yaml
 - 务必更换 `ADMIN_KEY`，不要使用示例占位值
 - 生产环境用反向代理终止 TLS，并限制管理台来源 IP
 - 不要把 `data/`、`tokens.db`、含密钥的配置提交到 Git
-- `mock_upstream: true` 仅用于联调；接真实上游前确认 OAuth / 账号数据已就绪
+- 必须设置 `UPSTREAM_BASE_URL` / `upstream.base_url`；进程直接反代上游（内置 mock 已移除）
 
 ## 许可证
 

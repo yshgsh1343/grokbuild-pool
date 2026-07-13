@@ -22,7 +22,7 @@ type TokenSet = catalog.TokenSet
 var ErrOAuthDisabled = errors.New("oauth disabled until M12")
 
 // DisabledOAuth 是拒绝真实网络刷新的桩 OAuthClient。
-// 非 mock-upstream 且未过门控时接入此实现，保留结构且不访问 auth.x.ai
+// 未过门控时接入此实现，保留结构且不访问 auth.x.ai
 //（UNLOCK_M12 为 false 或 POOL_OAUTH_ENABLED 未开）。
 type DisabledOAuth struct{}
 

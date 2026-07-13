@@ -112,7 +112,7 @@ func serveHTTP(cfg config.Config, pool *poolStack, up *upstreamStack, adm *admin
 			"max_concurrent", cfg.Limits.MaxConcurrent,
 			"hot_size", pool.HotLoaded,
 			"db", pool.DBPath,
-			"mock_upstream", cfg.UseMockUpstream(),
+			"upstream", cfg.Upstream.BaseURL,
 			"version", version,
 		)
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
@@ -148,9 +148,6 @@ func serveHTTP(cfg config.Config, pool *poolStack, up *upstreamStack, adm *admin
 	}
 	up.RefreshStop()
 	up.Refresh.Stop()
-	if up.MockServer != nil {
-		up.MockServer.Close()
-	}
 	_ = pool.Hot.Close()
 	_ = pool.Catalog.Close()
 	_ = adm.Tokens.Close()

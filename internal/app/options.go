@@ -8,8 +8,4 @@ type Options struct {
 	Listen     string
 	DataDir    string
 	DBPath     string
-
-	MockUpstream      bool
-	MockFailHalf      bool
-	MockStreamDelayMS int
 }

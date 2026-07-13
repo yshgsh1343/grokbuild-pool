@@ -492,7 +492,7 @@ func (h *Handlers) SafeConfig(w http.ResponseWriter, r *http.Request) {
 		"data_dir":       h.Config.DataDir,
 		"hot_size":       h.Config.HotSize,
 		"max_concurrent": h.Config.Limits.MaxConcurrent,
-		"mock_upstream":  h.Config.UseMockUpstream(),
+		"mock_upstream":  false,
 		"api_key_set":    strings.TrimSpace(h.Config.APIKey) != "",
 		"admin_key_set":  strings.TrimSpace(h.Config.AdminKey) != "",
 		"version":        h.Version,

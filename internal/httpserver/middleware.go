@@ -31,7 +31,7 @@ func RequestIDFromContext(ctx context.Context) string {
 // Middleware 公共 HTTP 中间件依赖。
 type Middleware struct {
 	// APIKey 非空时校验静态全局密钥（Bearer / x-api-key）。
-	// 为空且 TokenStore 也为空时：关闭客户端鉴权（本地冒烟）。
+	// 为空且 TokenStore 也为空时：关闭客户端鉴权（仅本地开发）。
 	APIKey string
 	// TokenStore 非空时优先按发放的 sk- 令牌鉴权（额度/并发/RPM）。
 	TokenStore *clients.Store
@@ -191,7 +191,7 @@ func ClientAuthFromContext(ctx context.Context) (clients.AuthInfo, bool) {
 // RequireClient 客户端鉴权：
 // 1) TokenStore 存在 → 校验 sk 令牌 + 额度 + 每令牌并发/RPM，并在结束后扣配额；
 // 2) 否则若配置了静态 APIKey → 常量时间比较；
-// 3) 都未配置 → 放行（本地 mock 冒烟）。
+// 3) 都未配置 → 放行（仅本地开发；生产请配置令牌或 API_KEY）。
 func (m *Middleware) RequireClient(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if m == nil {

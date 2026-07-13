@@ -11,7 +11,6 @@ import (
 	"github.com/yshgsh1343/grokbuild2api/internal/hot"
 	"github.com/yshgsh1343/grokbuild2api/internal/httpserver"
 	"github.com/yshgsh1343/grokbuild2api/internal/lease"
-	"github.com/yshgsh1343/grokbuild2api/internal/mockup"
 	"github.com/yshgsh1343/grokbuild2api/internal/outbound"
 	"github.com/yshgsh1343/grokbuild2api/internal/protocol/executor"
 	"github.com/yshgsh1343/grokbuild2api/internal/protocol/upstream"
@@ -20,7 +19,6 @@ import (
 
 // upstreamStack 上游 poster + OAuth 刷新 + executor。
 type upstreamStack struct {
-	MockServer  *mockup.ResponsesServer
 	Poster      executor.UpstreamPoster
 	Refresh     *refresh.Service
 	RefreshStop context.CancelFunc
@@ -28,45 +26,25 @@ type upstreamStack struct {
 	Outbound    *outbound.Factory
 }
 
-// wireUpstream 管线第 3 步：mock/live 上游 → refresh → executor（含按账号代理出站）。
+// wireUpstream 管线第 3 步：真实上游反代 → refresh → executor（含按账号代理出站）。
+// 不再内置 mock 上游；启动前须配置 upstream.base_url。
 func wireUpstream(cfg config.Config, opts Options, pool *poolStack, logger *slog.Logger) *upstreamStack {
-	var mockSrv *mockup.ResponsesServer
-	var poster executor.UpstreamPoster
-	if cfg.UseMockUpstream() {
-		mockSrv = mockup.NewResponsesServer()
-		if opts.MockFailHalf {
-			mockSrv.FailHalfByToken = true
-			mockSrv.FailStatus = 429
-		}
-		if opts.MockStreamDelayMS > 0 {
-			mockSrv.StreamChunkDelay = time.Duration(opts.MockStreamDelayMS) * time.Millisecond
-			mockSrv.StreamRepeat = 3
-		}
-		poster = &mockup.Poster{Client: mockSrv.Client()}
-		logger.Info("upstream_mock_enabled",
-			"base_url", mockSrv.URL(),
-			"fail_half", opts.MockFailHalf,
-			"stream_delay_ms", opts.MockStreamDelayMS,
-		)
-	} else {
-		uc := upstream.NewClient(upstream.Config{
-			BaseURL:          cfg.Upstream.BaseURL,
-			ClientVersion:    cfg.Upstream.ClientVersion,
-			ClientIdentifier: cfg.Upstream.ClientIdentifier,
-			TokenAuth:        cfg.Upstream.TokenAuth,
-			UserAgent:        cfg.Upstream.UserAgent,
-			RequestTimeout:   30 * time.Second,
-		})
-		poster = uc
-		logger.Info("upstream_live", "base_url", uc.BaseURL())
-	}
+	_ = opts
+	base := strings.TrimSpace(cfg.Upstream.BaseURL)
+	uc := upstream.NewClient(upstream.Config{
+		BaseURL:          base,
+		ClientVersion:    cfg.Upstream.ClientVersion,
+		ClientIdentifier: cfg.Upstream.ClientIdentifier,
+		TokenAuth:        cfg.Upstream.TokenAuth,
+		UserAgent:        cfg.Upstream.UserAgent,
+		RequestTimeout:   30 * time.Second,
+	})
+	poster := executor.UpstreamPoster(uc)
+	logger.Info("upstream_live", "base_url", uc.BaseURL())
 
-	// OAuth 刷新门禁
+	// OAuth 刷新门禁（真实 HTTP 或禁用；无 mock OAuth）
 	var oauth refresh.OAuthClient
 	switch {
-	case cfg.UseMockUpstream():
-		oauth = refresh.NewMockOAuthAdapter(mockup.NewMockOAuth())
-		logger.Info("refresh_oauth_mock")
 	case refresh.RealOAuthAllowed(cfg.OAuth.StatusPath):
 		oauth = refresh.NewHTTPRefreshClient(refresh.HTTPRefreshConfig{
 			RefreshURL: cfg.OAuth.RefreshURL,
@@ -91,9 +69,6 @@ func wireUpstream(cfg config.Config, opts Options, pool *poolStack, logger *slog
 	refreshCtx, refreshCancel := context.WithCancel(context.Background())
 	if err := refreshSvc.Start(refreshCtx); err != nil {
 		refreshCancel()
-		if mockSrv != nil {
-			mockSrv.Close()
-		}
 		fail(logger, "refresh_start_failed", err)
 	}
 	logger.Info("refresh_workers_started",
@@ -120,9 +95,6 @@ func wireUpstream(cfg config.Config, opts Options, pool *poolStack, logger *slog
 		Leaser:   pool.Lease,
 		Upstream: poster,
 		UpstreamFor: func(l lease.Lease) (executor.UpstreamPoster, error) {
-			if cfg.UseMockUpstream() {
-				return poster, nil
-			}
 			return outboundFactory.ClientFor(l.AccountID, l.ProxyURL)
 		},
 		Refresher:   refAdapter,
@@ -145,7 +117,6 @@ func wireUpstream(cfg config.Config, opts Options, pool *poolStack, logger *slog
 	}
 
 	return &upstreamStack{
-		MockServer:  mockSrv,
 		Poster:      poster,
 		Refresh:     refreshSvc,
 		RefreshStop: refreshCancel,
