@@ -2,7 +2,7 @@
  * - admin_key 仅存内存（state.adminKey），绝不写入 localStorage / sessionStorage
  * - 主题偏好键：localStorage["pool-admin-theme"] = "dark" | "light"
  * - 无 HTML inline 事件；全部 addEventListener（CSP script-src 'self'）
- * - 禁用 / 删除等危险操作以 toast 反馈，不弹 confirm
+ * - 危险删除经 dialog.confirmAction；结果用 toast（success/warning/danger）
  */
 import { state } from "./state.js";
 import { $, toast } from "./util.js";

@@ -1,8 +1,12 @@
 /* Tokens page — 创建 + 列表内联编辑并发/额度/RPM（PATCH 即时生效） */
 import { state } from "./state.js";
-import { $, esc, toast, copyText, skeletonRows } from "./util.js";
+import {
+  $, esc, toast, copyText, skeletonRows,
+  withButtonLoading, setControlsBusy, tokenLabel
+} from "./util.js";
 import { api, handleAuthError } from "./api.js";
 import { setAuthed, stopPoll, wrapPage, pageHd } from "./shell.js";
+import { confirmAction } from "./dialog.js";
 
 function extractPlainKeys(res) {
   var keys = [];
@@ -49,9 +53,9 @@ function bindOnceBox(keys) {
   if (all) {
     all.addEventListener("click", function () {
       copyText(keys.join("\n")).then(function () {
-        toast("已复制 " + keys.length + " 把密钥", true);
+        toast("已复制 " + keys.length + " 把密钥", "success");
       }).catch(function () {
-        toast("复制失败，请手动选择", false);
+        toast("复制失败，请手动选择", "danger");
       });
     });
   }
@@ -60,9 +64,9 @@ function bindOnceBox(keys) {
       var i = parseInt(btn.getAttribute("data-copy-one"), 10);
       if (!keys[i]) return;
       copyText(keys[i]).then(function () {
-        toast("已复制第 " + (i + 1) + " 把", true);
+        toast("已复制第 " + (i + 1) + " 把", "success");
       }).catch(function () {
-        toast("复制失败，请手动选择", false);
+        toast("复制失败，请手动选择", "danger");
       });
     });
   });
@@ -226,7 +230,7 @@ function parseIntSafe(el, fallback) {
 function saveEdit(host, id, btn) {
   var box = host.querySelector('.tok-edit[data-edit-id="' + id + '"]');
   if (!box) {
-    toast("编辑表单不存在", false);
+    toast("编辑表单不存在", "warning");
     return;
   }
   var nameEl = box.querySelector(".tok-e-name");
@@ -241,25 +245,31 @@ function saveEdit(host, id, btn) {
     remain_quota: parseIntSafe(quotaEl, 0),
     unlimited_quota: unlimEl && unlimEl.value === "1"
   };
-  if (btn) btn.disabled = true;
-  api("/admin/tokens/" + encodeURIComponent(id), {
-    method: "PATCH",
-    body: body
-  }).then(function (res) {
-    toast("已保存：并发 " + body.max_concurrent + " · RPM " + body.rpm + "（立即生效）", true);
-    loadTokens();
-  }).catch(function (e) {
-    if (handleAuthError(e)) return;
-    toast(e.message || "保存失败", false);
-    if (btn) btn.disabled = false;
-  });
+  return withButtonLoading(btn, function () {
+    return api("/admin/tokens/" + encodeURIComponent(id), {
+      method: "PATCH",
+      body: body
+    }).then(function () {
+      toast("已保存：并发 " + body.max_concurrent + " · RPM " + body.rpm + "（立即生效）", "success");
+      return loadTokens({ soft: true });
+    }).catch(function (e) {
+      if (handleAuthError(e)) return;
+      toast(e.message || "保存失败", "danger");
+      throw e;
+    });
+  }, { loadingText: "保存中…" });
 }
 
-function loadTokens() {
+function loadTokens(opts) {
+  opts = opts || {};
+  var soft = !!opts.soft;
   var host = $("tokTable");
   var cnt = $("tokCount");
-  if (!host) return;
-  api("/admin/tokens").then(function (res) {
+  if (!host) return Promise.resolve();
+  if (!soft || !host.querySelector("table")) {
+    /* keep existing table on soft refresh until data arrives */
+  }
+  return api("/admin/tokens").then(function (res) {
     var list = res.tokens || [];
     if (cnt) cnt.textContent = String(list.length);
     if (!list.length) {
@@ -322,47 +332,74 @@ function loadTokens() {
         if (act === "copy") {
           var k = btn.getAttribute("data-key") || "";
           if (!k) return;
-          copyText(k).then(function () { toast("已复制密钥", true); })
-            .catch(function () { toast("复制失败", false); });
+          copyText(k).then(function () { toast("已复制密钥", "success"); })
+            .catch(function () { toast("复制失败", "danger"); });
           return;
         }
         var id = btn.getAttribute("data-id");
         if (!id) return;
-        btn.disabled = true;
-        var p;
-        var okMsg = "已更新";
         if (act === "del") {
-          p = api("/admin/tokens/" + encodeURIComponent(id), { method: "DELETE" });
-          okMsg = "已删除";
-        } else if (act === "dis") {
-          p = api("/admin/tokens/" + encodeURIComponent(id) + "/disable", {
-            method: "POST", body: {}
+          var row = btn.closest("tr");
+          var nameCell = row ? row.children[3] : null;
+          var prefixCell = row ? row.children[4] : null;
+          var label = tokenLabel({
+            id: id,
+            name: nameCell ? nameCell.textContent : "",
+            key_prefix: prefixCell ? prefixCell.textContent : ""
           });
-          okMsg = "已禁用";
-        } else if (act === "en") {
-          p = api("/admin/tokens/" + encodeURIComponent(id) + "/enable", {
-            method: "POST", body: {}
+          confirmAction({
+            title: "删除令牌",
+            message: "将永久删除令牌「" + label + "」。完整密钥不会显示在此对话框中。此操作无法撤销。",
+            confirmLabel: "永久删除",
+            cancelLabel: "取消",
+            tone: "danger"
+          }).then(function (ok) {
+            if (!ok) return;
+            return withButtonLoading(btn, function () {
+              return api("/admin/tokens/" + encodeURIComponent(id), { method: "DELETE" }).then(function () {
+                toast("已删除令牌", "success");
+                return loadTokens({ soft: true });
+              }).catch(function (e) {
+                if (handleAuthError(e)) return;
+                toast(e.message || "删除失败", "danger");
+                throw e;
+              });
+            }, { loadingText: "删除中…" });
           });
-          okMsg = "已启用";
-        } else {
-          btn.disabled = false;
           return;
         }
-        p.then(function () {
-          toast(okMsg, true);
-          loadTokens();
-        }).catch(function (e) {
-          if (handleAuthError(e)) return;
-          toast(e.message || "操作失败", false);
-          btn.disabled = false;
-        });
+        var path;
+        var okMsg = "已更新";
+        var loadingText = "处理中…";
+        if (act === "dis") {
+          path = "/admin/tokens/" + encodeURIComponent(id) + "/disable";
+          okMsg = "已禁用";
+        } else if (act === "en") {
+          path = "/admin/tokens/" + encodeURIComponent(id) + "/enable";
+          okMsg = "已启用";
+        } else {
+          return;
+        }
+        withButtonLoading(btn, function () {
+          return api(path, { method: "POST", body: {} }).then(function () {
+            toast(okMsg, "success");
+            return loadTokens({ soft: true });
+          }).catch(function (e) {
+            if (handleAuthError(e)) return;
+            toast(e.message || "操作失败", "danger");
+            throw e;
+          });
+        }, { loadingText: loadingText });
       });
     });
   }).catch(function (e) {
     if (handleAuthError(e)) return;
-    host.innerHTML =
-      '<div class="err-box">加载令牌失败：' + esc(e.message) + "</div>";
-    toast(e.message, false);
+    var hadTable = !!(host && host.querySelector("table"));
+    if (!hadTable) {
+      host.innerHTML =
+        '<div class="err-box">加载令牌失败：' + esc(e.message) + "</div>";
+    }
+    toast(hadTable ? "刷新失败，当前显示的可能是旧数据" : (e.message || "加载失败"), "danger");
     updateTokSelUI();
   });
 }
@@ -402,7 +439,6 @@ export function renderTokens() {
   );
 
   $("createBtn").addEventListener("click", function () {
-    // 显式传数字（含 0），后端用指针区分「未传」与「0=不限」
     var body = {
       name: ($("tName").value || "").trim() || "client",
       count: parseInt($("tCount").value, 10) || 1,
@@ -412,26 +448,26 @@ export function renderTokens() {
       rpm: parseInt($("tRpm").value, 10) || 0
     };
     var btn = $("createBtn");
-    if (btn) btn.disabled = true;
-    api("/admin/tokens", { method: "POST", body: body }).then(function (res) {
-      var keys = extractPlainKeys(res);
-      bindOnceBox(keys);
-      if (keys[0]) {
-        copyText(keys.join("\n")).then(function () {
-          toast("已创建并复制到剪贴板（并发=" + body.max_concurrent + "）", true);
-        }).catch(function () {
-          toast("已创建 " + keys.length + " 把密钥（请手动复制）", true);
-        });
-      } else {
-        toast("已创建", true);
-      }
-      loadTokens();
-    }).catch(function (e) {
-      if (handleAuthError(e)) return;
-      toast(e.message || "创建失败", false);
-    }).then(function () {
-      if (btn) btn.disabled = false;
-    });
+    withButtonLoading(btn, function () {
+      return api("/admin/tokens", { method: "POST", body: body }).then(function (res) {
+        var keys = extractPlainKeys(res);
+        bindOnceBox(keys);
+        if (keys[0]) {
+          return copyText(keys.join("\n")).then(function () {
+            toast("已创建并复制到剪贴板（并发=" + body.max_concurrent + "）", "success");
+          }).catch(function () {
+            toast("已创建 " + keys.length + " 把密钥（请手动复制）", "success");
+          });
+        }
+        toast("已创建", "success");
+      }).then(function () {
+        return loadTokens({ soft: true });
+      }).catch(function (e) {
+        if (handleAuthError(e)) return;
+        toast(e.message || "创建失败", "danger");
+        throw e;
+      });
+    }, { loadingText: "创建中…" });
   });
   $("tokRefresh").addEventListener("click", loadTokens);
   $("tokSelectAll").addEventListener("click", function () {
@@ -449,35 +485,54 @@ export function renderTokens() {
   $("tokCopySelected").addEventListener("click", function () {
     var keys = selectedTokenKeys();
     if (!keys.length) {
-      toast("请先勾选有明文密钥的令牌（旧令牌可能无存盘）", false);
+      toast("请先勾选有明文密钥的令牌（旧令牌可能无存盘）", "warning");
       return;
     }
     copyText(keys.join("\n")).then(function () {
-      toast("已复制 " + keys.length + " 把密钥", true);
+      toast("已复制 " + keys.length + " 把密钥", "success");
     }).catch(function () {
-      toast("复制失败，请手动展开复制", false);
+      toast("复制失败，请手动展开复制", "danger");
     });
   });
   $("tokBatchDelete").addEventListener("click", function () {
     var ids = selectedTokenIds();
     if (!ids.length) {
-      toast("请先勾选令牌", false);
+      toast("请先勾选令牌", "warning");
       return;
     }
-    var btn = $("tokBatchDelete");
-    if (btn) btn.disabled = true;
-    var t0 = Date.now();
-    api("/admin/tokens/batch", {
-      method: "POST",
-      body: { action: "delete", ids: ids }
-    }).then(function (res) {
-      var ok = res && res.ok != null ? res.ok : 0;
-      toast("批量删除：成功 " + ok + "（" + (Date.now() - t0) + "ms）", true);
-      loadTokens();
-    }).catch(function (e) {
-      if (handleAuthError(e)) return;
-      toast(e.message || "批量删除失败", false);
-      updateTokSelUI();
+    confirmAction({
+      title: "删除 " + ids.length + " 个令牌",
+      message: "这些客户端令牌将被永久删除，持有者将立即无法调用 API。完整密钥不会显示。",
+      confirmLabel: "永久删除",
+      cancelLabel: "取消",
+      tone: "danger",
+      requiredText: "DELETE"
+    }).then(function (ok) {
+      if (!ok) return;
+      var btn = $("tokBatchDelete");
+      setControlsBusy(["tokBatchDelete", "tokSelectAll", "tokSelectNone", "tokCopySelected", "createBtn"], true);
+      return withButtonLoading(btn, function () {
+        var t0 = Date.now();
+        return api("/admin/tokens/batch", {
+          method: "POST",
+          body: { action: "delete", ids: ids }
+        }).then(function (res) {
+          var okN = res && res.ok != null ? res.ok : 0;
+          var failed = res && res.failed != null ? res.failed : (ids.length - okN);
+          var msg = "批量删除：成功 " + okN + " 个";
+          if (failed > 0) msg += "，失败 " + failed + " 个";
+          msg += "（" + (Date.now() - t0) + "ms）";
+          toast(msg, failed > 0 ? "warning" : "success");
+          return loadTokens({ soft: true });
+        }).catch(function (e) {
+          if (handleAuthError(e)) return;
+          toast(e.message || "批量删除失败", "danger");
+          throw e;
+        });
+      }, { loadingText: "删除中…" }).then(function () {
+        setControlsBusy(["tokBatchDelete", "tokSelectAll", "tokSelectNone", "tokCopySelected", "createBtn"], false);
+        updateTokSelUI();
+      });
     });
   });
   loadTokens();

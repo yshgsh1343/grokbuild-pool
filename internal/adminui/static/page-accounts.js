@@ -1,8 +1,12 @@
 /* Accounts page — cursor pagination + batch ops + status */
 import { state } from "./state.js";
-import { $, esc, toast, fmtCooldown, skeletonRows } from "./util.js";
+import {
+  $, esc, toast, fmtCooldown, skeletonRows,
+  withButtonLoading, setControlsBusy, accountLabel
+} from "./util.js";
 import { api, handleAuthError, adminAuthHeaders } from "./api.js";
 import { setAuthed, stopPoll, wrapPage, pageHd } from "./shell.js";
+import { confirmAction } from "./dialog.js";
 
 function updateAccPagerUI(pageCount) {
   var prev = $("accPrev");
@@ -171,44 +175,77 @@ function formatSuccessRate(a) {
     '<div class="muted" style="font-size:11px">' + ok + " 成功 / " + bad + " 失败</div>";
 }
 
+function batchControlIds() {
+  return [
+    "accBatchEnable", "accBatchDisable", "accBatchDelete", "accBatchProbe",
+    "accSelectAll", "accSelectNone"
+  ];
+}
+
 function runBatchAccounts(action) {
   var ids = selectedAccountIds();
   if (!ids.length) {
-    toast("请先勾选账号", false);
+    toast("请先勾选账号", "warning");
     return;
   }
-  // 无前端条数硬限；后端自动按 chunk 分块
-  var btns = ["accBatchEnable", "accBatchDisable", "accBatchDelete", "accSelectAll", "accSelectNone"];
-  btns.forEach(function (id) {
-    var el = $(id);
-    if (el) el.disabled = true;
-  });
-  var t0 = Date.now();
-  api("/admin/accounts/batch", {
-    method: "POST",
-    body: { action: action, ids: ids }
-  }).then(function (res) {
-    var ok = res && res.ok != null ? res.ok : 0;
-    var failed = res && res.failed != null ? res.failed : 0;
-    var verb = action === "enable" ? "启用" : action === "delete" ? "删除" : "禁用";
-    var ms = Date.now() - t0;
-    toast("批量" + verb + "：成功 " + ok + (failed ? "，失败 " + failed : "") + "（" + ms + "ms）", failed === 0);
-    loadAccounts();
-  }).catch(function (e) {
-    if (handleAuthError(e)) return;
-    toast(e.message || "批量操作失败", false);
-    updateAccSelUI();
+  var verb = action === "enable" ? "启用" : action === "delete" ? "删除" : "禁用";
+  var confirmP;
+  if (action === "delete") {
+    confirmP = confirmAction({
+      title: "删除 " + ids.length + " 个账号",
+      message: "这些账号的凭据与相关记录将被永久删除，此操作无法撤销。不会显示任何完整密钥。",
+      confirmLabel: "永久删除",
+      cancelLabel: "取消",
+      tone: "danger",
+      requiredText: "DELETE"
+    });
+  } else {
+    confirmP = confirmAction({
+      title: "批量" + verb + " " + ids.length + " 个账号",
+      message: "将对已选账号执行「" + verb + "」。",
+      confirmLabel: "确认" + verb,
+      cancelLabel: "取消",
+      tone: action === "disable" ? "warning" : "neutral"
+    });
+  }
+  confirmP.then(function (ok) {
+    if (!ok) return;
+    setControlsBusy(batchControlIds(), true);
+    var t0 = Date.now();
+    return api("/admin/accounts/batch", {
+      method: "POST",
+      body: { action: action, ids: ids }
+    }).then(function (res) {
+      var okN = res && res.ok != null ? res.ok : 0;
+      var failed = res && res.failed != null ? res.failed : 0;
+      var ms = Date.now() - t0;
+      var msg = "批量" + verb + "：成功 " + okN + " 个";
+      if (failed) msg += "，失败 " + failed + " 个";
+      msg += "（" + ms + "ms）";
+      toast(msg, failed ? "warning" : "success");
+      return loadAccounts({ soft: true });
+    }).catch(function (e) {
+      if (handleAuthError(e)) return;
+      toast(e.message || "批量操作失败", "danger");
+    }).then(function () {
+      setControlsBusy(batchControlIds(), false);
+      updateAccSelUI();
+    });
   });
 }
 
-function loadAccounts() {
+function loadAccounts(opts) {
+  opts = opts || {};
+  var soft = !!opts.soft;
   var host = $("accTable");
   var errBox = $("accErr");
-  if (!host) return;
+  if (!host) return Promise.resolve();
   if (errBox) errBox.innerHTML = "";
   state.accLoading = true;
   updateAccPagerUI(null);
-  host.innerHTML = skeletonRows(6, "加载账号");
+  if (!soft || !host.querySelector("table")) {
+    host.innerHTML = skeletonRows(6, "加载账号");
+  }
 
   var limit = state.accPageSize > 0 ? state.accPageSize : 50;
   if (limit > 200) limit = 200;
@@ -221,7 +258,7 @@ function loadAccounts() {
   if (life) q += "&lifecycle=" + encodeURIComponent(life);
   if (qq) q += "&q=" + encodeURIComponent(qq);
 
-  api(q).then(function (res) {
+  return api(q).then(function (res) {
     state.accLoading = false;
     var list = (res && res.accounts) || [];
     state.accNextCursor = (res && res.next_cursor) ? String(res.next_cursor) : "";
@@ -268,6 +305,9 @@ function loadAccounts() {
             esc(a.id) + '">禁用</button>'
           : '<button type="button" class="btn btn-sm btn-secondary" data-act="en" data-id="' +
             esc(a.id) + '">启用</button>') +
+        '<button type="button" class="btn btn-sm btn-danger" data-act="del" data-id="' +
+          esc(a.id) + '" data-email="' + esc(a.email || "") + '" data-name="' +
+          esc(a.name || "") + '">删除</button>' +
         "</td></tr>";
     }).join("");
     host.innerHTML =
@@ -298,57 +338,105 @@ function loadAccounts() {
         var id = btn.getAttribute("data-id");
         var act = btn.getAttribute("data-act");
         if (!id) return;
-        btn.disabled = true;
+
         if (act === "probe") {
-          api("/admin/accounts/" + encodeURIComponent(id) + "/probe", {
-            method: "POST", body: {}
-          }).then(function (res) {
-            if (res && res.probe_ok) {
-              var bits = ["测活成功"];
-              if (res.monthly_used != null || res.monthly_limit != null) {
-                bits.push("月 " + fmtNum(res.monthly_used, 0) + "/" + fmtNum(res.monthly_limit, 0));
+          withButtonLoading(btn, function () {
+            return api("/admin/accounts/" + encodeURIComponent(id) + "/probe", {
+              method: "POST", body: {}
+            }).then(function (res) {
+              if (res && res.probe_ok) {
+                var bits = ["测活成功"];
+                if (res.monthly_used != null || res.monthly_limit != null) {
+                  bits.push("月 " + fmtNum(res.monthly_used, 0) + "/" + fmtNum(res.monthly_limit, 0));
+                }
+                if (res.weekly_usage_percent != null) {
+                  bits.push("周 " + fmtNum(res.weekly_usage_percent, 1) + "%");
+                }
+                toast(bits.join(" · "), "success");
+              } else {
+                var pe = (res && res.probe_error) || "unknown";
+                // 不展示过长上游 body
+                if (String(pe).length > 120) pe = String(pe).slice(0, 120) + "…";
+                toast("测活失败：" + pe, "danger");
               }
-              if (res.weekly_usage_percent != null) {
-                bits.push("周 " + fmtNum(res.weekly_usage_percent, 1) + "%");
-              }
-              toast(bits.join(" · "), true);
-            } else {
-              toast("测活失败：" + ((res && res.probe_error) || "unknown"), false);
-            }
-            loadAccounts();
-          }).catch(function (e) {
-            if (handleAuthError(e)) return;
-            toast(e.message || "测活失败", false);
-            btn.disabled = false;
+              return loadAccounts({ soft: true });
+            }).catch(function (e) {
+              if (handleAuthError(e)) return;
+              toast(e.message || "测活失败", "danger");
+              throw e;
+            });
+          }, { loadingText: "测活中…" });
+          return;
+        }
+
+        if (act === "del") {
+          var label = accountLabel({
+            id: id,
+            email: btn.getAttribute("data-email"),
+            name: btn.getAttribute("data-name")
+          });
+          confirmAction({
+            title: "删除账号",
+            message: "将永久删除账号「" + label + "」及其凭据记录，此操作无法撤销。",
+            confirmLabel: "永久删除",
+            cancelLabel: "取消",
+            tone: "danger"
+          }).then(function (ok) {
+            if (!ok) return;
+            return withButtonLoading(btn, function () {
+              return api("/admin/accounts/batch", {
+                method: "POST",
+                body: { action: "delete", ids: [id] }
+              }).then(function (res) {
+                var okN = res && res.ok != null ? res.ok : 0;
+                var failed = res && res.failed != null ? res.failed : 0;
+                if (failed) toast("删除失败 " + failed + " 个（成功 " + okN + "）", "warning");
+                else toast("已删除账号", "success");
+                return loadAccounts({ soft: true });
+              }).catch(function (e) {
+                if (handleAuthError(e)) return;
+                toast(e.message || "删除失败", "danger");
+                throw e;
+              });
+            }, { loadingText: "删除中…" });
           });
           return;
         }
+
         var path = act === "dis"
           ? "/admin/accounts/" + encodeURIComponent(id) + "/disable"
           : "/admin/accounts/" + encodeURIComponent(id) + "/enable";
         var okMsg = act === "dis" ? "已禁用账号" : "已启用账号";
-        api(path, { method: "POST", body: {} }).then(function () {
-          toast(okMsg, true);
-          loadAccounts();
-        }).catch(function (e) {
-          if (handleAuthError(e)) return;
-          toast(e.message || "操作失败", false);
-          btn.disabled = false;
-        });
+        withButtonLoading(btn, function () {
+          return api(path, { method: "POST", body: {} }).then(function () {
+            toast(okMsg, "success");
+            return loadAccounts({ soft: true });
+          }).catch(function (e) {
+            if (handleAuthError(e)) return;
+            toast(e.message || "操作失败", "danger");
+            throw e;
+          });
+        }, { loadingText: "处理中…" });
       });
     });
   }).catch(function (e) {
     state.accLoading = false;
     if (handleAuthError(e)) return;
-    host.innerHTML = "";
-    if (errBox) {
+    var hadTable = !!(host && host.querySelector("table"));
+    if (!hadTable) {
+      host.innerHTML = "";
+      if (errBox) {
+        errBox.innerHTML =
+          '<div class="err-box">加载账号失败：' + esc(e.message) +
+          '<div class="muted">请检查服务、admin_key 与 catalog 是否挂载</div></div>';
+      }
+    } else if (errBox) {
       errBox.innerHTML =
-        '<div class="err-box">加载账号失败：' + esc(e.message) +
-        '<div class="muted">请检查服务、admin_key 与 catalog 是否挂载</div></div>';
+        '<div class="err-box">刷新失败，当前显示的可能是旧数据：' + esc(e.message) + "</div>";
     }
-    toast(e.message, false);
+    toast(hadTable ? "刷新失败，当前显示的可能是旧数据" : (e.message || "加载失败"), "danger");
     updateAccSelUI();
-    updateAccPagerUI(0);
+    updateAccPagerUI(hadTable ? null : 0);
   });
 }
 
@@ -452,7 +540,7 @@ export function renderAccounts() {
       toast("导出完成" + (pack.total ? "（共 " + pack.total + " 条）" : ""), true);
     }).catch(function (e) {
       if (handleAuthError(e)) return;
-      toast(e.message || "导出失败", false);
+      toast(e.message || "导出失败", "danger");
     });
   });
   $("accSelectAll").addEventListener("click", function () {
@@ -480,27 +568,33 @@ export function renderAccounts() {
   $("accBatchProbe").addEventListener("click", function () {
     var ids = selectedAccountIds();
     if (!ids.length) {
-      toast("请先勾选账号", false);
+      toast("请先勾选账号", "warning");
       return;
     }
     if (ids.length > 100) {
-      toast("单次最多测活 100 个", false);
+      toast("单次最多测活 100 个", "warning");
       return;
     }
     var btn = $("accBatchProbe");
-    if (btn) btn.disabled = true;
-    var t0 = Date.now();
-    api("/admin/accounts/probe", {
-      method: "POST",
-      body: { ids: ids }
-    }).then(function (res) {
-      var ok = res && res.ok != null ? res.ok : 0;
-      var failed = res && res.failed != null ? res.failed : 0;
-      toast("批量测活：OK " + ok + " · 失败 " + failed + "（" + (Date.now() - t0) + "ms）", failed === 0);
-      loadAccounts();
-    }).catch(function (e) {
-      if (handleAuthError(e)) return;
-      toast(e.message || "批量测活失败", false);
+    setControlsBusy(batchControlIds(), true);
+    withButtonLoading(btn, function () {
+      var t0 = Date.now();
+      return api("/admin/accounts/probe", {
+        method: "POST",
+        body: { ids: ids }
+      }).then(function (res) {
+        var ok = res && res.ok != null ? res.ok : 0;
+        var failed = res && res.failed != null ? res.failed : 0;
+        toast("批量测活：OK " + ok + " · 失败 " + failed + "（" + (Date.now() - t0) + "ms）",
+          failed ? "warning" : "success");
+        return loadAccounts({ soft: true });
+      }).catch(function (e) {
+        if (handleAuthError(e)) return;
+        toast(e.message || "批量测活失败", "danger");
+        throw e;
+      });
+    }, { loadingText: "测活中…" }).then(function () {
+      setControlsBusy(batchControlIds(), false);
       updateAccSelUI();
     });
   });

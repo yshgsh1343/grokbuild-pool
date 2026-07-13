@@ -265,12 +265,12 @@ export function renderImportJobs() {
         btn.disabled = false;
         btn.textContent = "上传并创建任务";
         if (fail === 0) {
-          toast("已创建 " + ok + " 个导入任务", true);
+          toast("已创建 " + ok + " 个导入任务", "success");
         } else {
           var msg = "创建完成：成功 " + ok + " · 失败 " + fail +
             (errors[0] ? ("（" + errors[0] + "）") : "");
           setImportError(msg);
-          toast(msg, ok > 0);
+          toast(msg, ok > 0 ? "warning" : "danger");
         }
         return loadJobs();
       }

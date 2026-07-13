@@ -1,6 +1,6 @@
 /* Settings designer — save updates hint+snapshot only, not full form */
 import { state } from "./state.js";
-import { $, esc, toast, prefersReducedMotion } from "./util.js";
+import { $, esc, toast, prefersReducedMotion, withButtonLoading } from "./util.js";
 import { api, handleAuthError } from "./api.js";
 import { setAuthed, stopPoll, wrapPage, pageHd } from "./shell.js";
 import { field, fieldText, fieldSelect, fieldBool, fieldArea } from "./fields.js";
@@ -250,7 +250,7 @@ export function renderSettings() {
       if (handleAuthError(e)) return;
       var err = $("setErr");
       if (err) err.innerHTML = '<div class="err-box">' + esc(e.message) + "</div>";
-      toast(e.message, false);
+      toast(e.message, "danger");
     });
   }
 
@@ -355,9 +355,9 @@ export function renderSettings() {
       var persisted = !!(res && res.persisted);
       var restartHint = (s && s.restart_hint) || "";
       if (restartHint) {
-        toast((persisted ? "已保存。" : "已应用。") + restartHint, false);
+        toast((persisted ? "已保存。" : "已应用。") + restartHint, "warning");
       } else {
-        toast(persisted ? "已保存并热更新（无需重启）" : "已热更新（无需重启）", true);
+        toast(persisted ? "已保存并热更新（无需重启）" : "已热更新（无需重启）", "success");
       }
       applyMeta(s, {
         saved: true,
@@ -367,7 +367,7 @@ export function renderSettings() {
       });
     }).catch(function (e) {
       if (handleAuthError(e)) return;
-      toast(e.message || "保存失败", false);
+      toast(e.message || "保存失败", "danger");
     }).then(function () {
       if (btn) {
         btn.disabled = false;
