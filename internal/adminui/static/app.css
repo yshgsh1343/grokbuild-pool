@@ -1585,3 +1585,63 @@ tr.tok-detail-row.hidden {
 .admin-main main#main {
   overflow-anchor: none;
 }
+
+
+/* Dashboard overview */
+.stat-sub {
+  margin-top: 4px;
+  font-size: 11px;
+  line-height: 1.35;
+}
+.overview-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 12px;
+}
+.overview-card {
+  border: 1px solid var(--color-border-default);
+  border-radius: 12px;
+  padding: 12px 14px;
+  background: var(--color-bg-surface);
+}
+.overview-title {
+  font-size: 12px;
+  color: var(--color-text-secondary);
+  margin-bottom: 6px;
+}
+.overview-value {
+  font-size: 22px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.15;
+}
+.overview-sub {
+  margin-top: 6px;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+/* Accounts filters */
+.acc-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 10px;
+  align-items: end;
+  margin: 0 0 12px;
+}
+.acc-filters .field {
+  min-width: 120px;
+}
+.acc-filters .field label {
+  margin-bottom: 2px;
+}
+.acc-filters .input {
+  min-height: 32px;
+}
+.acc-filters .field-grow {
+  flex: 1 1 180px;
+  min-width: 160px;
+}
+.rate-ok { color: var(--color-success); font-weight: 600; }
+.rate-mid { color: #b45309; font-weight: 600; }
+.rate-bad { color: var(--color-danger); font-weight: 600; }

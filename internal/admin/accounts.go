@@ -41,9 +41,14 @@ func (h *Handlers) ListAccounts(w http.ResponseWriter, r *http.Request) {
 		limit = n
 	}
 	cursor := strings.TrimSpace(r.URL.Query().Get("cursor"))
+	filter := catalog.AccountListFilter{
+		Status:    strings.TrimSpace(r.URL.Query().Get("status")),
+		Lifecycle: strings.TrimSpace(r.URL.Query().Get("lifecycle")),
+		Query:     strings.TrimSpace(r.URL.Query().Get("q")),
+	}
 
 	// 多取 1 条判断是否有下一页
-	rows, err := h.Catalog.ListAccounts(limit+1, cursor)
+	rows, err := h.Catalog.ListAccounts(limit+1, cursor, filter)
 	if err != nil {
 		if errors.Is(err, catalog.ErrInvalidInput) {
 			writeErr(w, http.StatusBadRequest, err.Error())
@@ -61,7 +66,7 @@ func (h *Handlers) ListAccounts(w http.ResponseWriter, r *http.Request) {
 		rows = []catalog.AccountSummary{}
 	}
 	total := 0
-	if n, err := h.Catalog.CountAccounts(); err == nil {
+	if n, err := h.Catalog.CountAccountsFiltered(filter); err == nil {
 		total = n
 	}
 	stats, _ := h.Catalog.Stats()
@@ -70,13 +75,18 @@ func (h *Handlers) ListAccounts(w http.ResponseWriter, r *http.Request) {
 		"next_cursor": nextCursor,
 		"limit":       limit,
 		"total":       total,
+		"filter": map[string]any{
+			"status":    filter.Status,
+			"lifecycle": filter.Lifecycle,
+			"q":         filter.Query,
+		},
 		"stats": map[string]any{
-			"count":            stats.Count,
-			"enabled":          stats.EnabledCount,
-			"active":           stats.ActiveCount,
-			"cooldown":         stats.CooldownCount,
-			"quarantine":       stats.QuarantineCount,
-			"disabled":         stats.DisabledCount,
+			"count":      stats.Count,
+			"enabled":    stats.EnabledCount,
+			"active":     stats.ActiveCount,
+			"cooldown":   stats.CooldownCount,
+			"quarantine": stats.QuarantineCount,
+			"disabled":   stats.DisabledCount,
 		},
 	})
 }

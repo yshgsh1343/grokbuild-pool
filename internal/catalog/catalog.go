@@ -32,6 +32,7 @@ CREATE TABLE IF NOT EXISTS accounts (
   proxy_mode TEXT,
   proxy_url TEXT,
   failure_count INTEGER NOT NULL DEFAULT 0,
+  success_count INTEGER NOT NULL DEFAULT 0,
   cooldown_until INTEGER NOT NULL DEFAULT 0,
   last_error TEXT,
   last_used_at INTEGER,
@@ -115,6 +116,41 @@ func (c *Catalog) migrate() error {
 	if _, err := c.db.Exec(schemaSQL); err != nil {
 		return fmt.Errorf("catalog: migrate: %w", err)
 	}
+	if err := c.ensureColumn("accounts", "success_count", "INTEGER NOT NULL DEFAULT 0"); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (c *Catalog) ensureColumn(table, col, decl string) error {
+	q := "PRAGMA table_info(" + table + ")"
+	rows, err := c.db.Query(q)
+	if err != nil {
+		return fmt.Errorf("catalog: pragma table_info %s: %w", table, err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var cid int
+		var name, ctype string
+		var notnull, pk int
+		var dflt sql.NullString
+		if err := rows.Scan(&cid, &name, &ctype, &notnull, &dflt, &pk); err != nil {
+			return err
+		}
+		if name == col {
+			return nil
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	_, err = c.db.Exec("ALTER TABLE " + table + " ADD COLUMN " + col + " " + decl)
+	if err != nil {
+		if strings.Contains(strings.ToLower(err.Error()), "duplicate column") {
+			return nil
+		}
+		return fmt.Errorf("catalog: add column %s.%s: %w", table, col, err)
+	}
 	return nil
 }
 
@@ -163,13 +199,13 @@ func (c *Catalog) UpsertMany(accounts []Account) error {
 INSERT INTO accounts (
   id, revision, identity_key, email, name, priority, enabled, manual_disabled,
   lifecycle, access_token, refresh_token, expires_at, proxy_mode, proxy_url,
-  failure_count, cooldown_until, last_error, last_used_at, last_success_at,
+  failure_count, success_count, cooldown_until, last_error, last_used_at, last_success_at,
   last_refresh_at, consecutive_unauthorized, quarantine_fp, purge_after,
   billing_json, created_at, updated_at
 ) VALUES (
   ?, ?, ?, ?, ?, ?, ?, ?,
   ?, ?, ?, ?, ?, ?,
-  ?, ?, ?, ?, ?,
+  ?, ?, ?, ?, ?, ?,
   ?, ?, ?, ?,
   ?, ?, ?
 )
@@ -188,6 +224,7 @@ ON CONFLICT(id) DO UPDATE SET
   proxy_mode=excluded.proxy_mode,
   proxy_url=excluded.proxy_url,
   failure_count=excluded.failure_count,
+  success_count=excluded.success_count,
   cooldown_until=excluded.cooldown_until,
   last_error=excluded.last_error,
   last_used_at=excluded.last_used_at,
@@ -243,7 +280,7 @@ ON CONFLICT(id) DO UPDATE SET
 				a.Priority, boolToInt(a.Enabled), boolToInt(a.ManualDisabled),
 				lifecycle, a.AccessToken, a.RefreshToken, a.ExpiresAt,
 				nullStr(a.ProxyMode), nullStr(a.ProxyURL),
-				a.FailureCount, a.CooldownUntil, nullStr(a.LastError),
+				a.FailureCount, a.SuccessCount, a.CooldownUntil, nullStr(a.LastError),
 				nullInt64(a.LastUsedAt), nullInt64(a.LastSuccessAt), nullInt64(a.LastRefreshAt),
 				a.ConsecutiveUnauthorized, nullStr(a.QuarantineFP), nullInt64(a.PurgeAfter),
 				nullStr(a.BillingJSON), created, updated,
@@ -281,13 +318,13 @@ func (c *Catalog) UpsertImportedMany(accounts []Account) error {
 	INSERT INTO accounts (
 	  id, revision, identity_key, email, name, priority, enabled, manual_disabled,
 	  lifecycle, access_token, refresh_token, expires_at, proxy_mode, proxy_url,
-	  failure_count, cooldown_until, last_error, last_used_at, last_success_at,
+	  failure_count, success_count, cooldown_until, last_error, last_used_at, last_success_at,
 	  last_refresh_at, consecutive_unauthorized, quarantine_fp, purge_after,
 	  billing_json, created_at, updated_at
 	) VALUES (
 	  ?, ?, ?, ?, ?, ?, ?, ?,
 	  ?, ?, ?, ?, ?, ?,
-	  ?, ?, ?, ?, ?,
+	  ?, ?, ?, ?, ?, ?,
 	  ?, ?, ?, ?,
 	  ?, ?, ?
 	)
@@ -340,7 +377,7 @@ func (c *Catalog) UpsertImportedMany(accounts []Account) error {
 			a.Priority, boolToInt(a.Enabled), boolToInt(a.ManualDisabled),
 			lifecycle, a.AccessToken, a.RefreshToken, a.ExpiresAt,
 			nullStr(a.ProxyMode), nullStr(a.ProxyURL),
-			a.FailureCount, a.CooldownUntil, nullStr(a.LastError),
+			a.FailureCount, a.SuccessCount, a.CooldownUntil, nullStr(a.LastError),
 			nullInt64(a.LastUsedAt), nullInt64(a.LastSuccessAt), nullInt64(a.LastRefreshAt),
 			a.ConsecutiveUnauthorized, nullStr(a.QuarantineFP), nullInt64(a.PurgeAfter),
 			nullStr(a.BillingJSON), created, updated,
@@ -385,7 +422,7 @@ func (c *Catalog) Get(id string) (Account, error) {
 	const q = `
 SELECT id, revision, identity_key, email, name, priority, enabled, manual_disabled,
   lifecycle, access_token, refresh_token, expires_at, proxy_mode, proxy_url,
-  failure_count, cooldown_until, last_error, last_used_at, last_success_at,
+  failure_count, success_count, cooldown_until, last_error, last_used_at, last_success_at,
   last_refresh_at, consecutive_unauthorized, quarantine_fp, purge_after,
   billing_json, created_at, updated_at
 FROM accounts WHERE id = ?`
@@ -653,6 +690,9 @@ func (c *Catalog) PatchHealth(id string, patch HealthPatch) error {
 	if patch.FailureCount != nil {
 		cur.FailureCount = *patch.FailureCount
 	}
+	if patch.SuccessCount != nil {
+		cur.SuccessCount = *patch.SuccessCount
+	}
 	if patch.CooldownUntil != nil {
 		cur.CooldownUntil = *patch.CooldownUntil
 	}
@@ -690,6 +730,7 @@ UPDATE accounts SET
   manual_disabled = ?,
   lifecycle = ?,
   failure_count = ?,
+  success_count = ?,
   cooldown_until = ?,
   last_error = ?,
   last_used_at = ?,
@@ -704,7 +745,7 @@ UPDATE accounts SET
 WHERE id = ?`
 	_, err = c.db.Exec(q,
 		boolToInt(cur.Enabled), boolToInt(cur.ManualDisabled), cur.Lifecycle,
-		cur.FailureCount, cur.CooldownUntil, nullStr(cur.LastError),
+		cur.FailureCount, cur.SuccessCount, cur.CooldownUntil, nullStr(cur.LastError),
 		nullInt64(cur.LastUsedAt), nullInt64(cur.LastSuccessAt), nullInt64(cur.LastRefreshAt),
 		cur.ConsecutiveUnauthorized, nullStr(cur.QuarantineFP), nullInt64(cur.PurgeAfter),
 		nullStr(cur.BillingJSON), now, id,
@@ -719,7 +760,7 @@ func (c *Catalog) getUnlocked(id string) (Account, error) {
 	const q = `
 SELECT id, revision, identity_key, email, name, priority, enabled, manual_disabled,
   lifecycle, access_token, refresh_token, expires_at, proxy_mode, proxy_url,
-  failure_count, cooldown_until, last_error, last_used_at, last_success_at,
+  failure_count, success_count, cooldown_until, last_error, last_used_at, last_success_at,
   last_refresh_at, consecutive_unauthorized, quarantine_fp, purge_after,
   billing_json, created_at, updated_at
 FROM accounts WHERE id = ?`
@@ -828,7 +869,7 @@ func (c *Catalog) ListExpiring(limit int, beforeUnix int64) ([]Account, error) {
 	const q = `
 SELECT id, revision, identity_key, email, name, priority, enabled, manual_disabled,
   lifecycle, access_token, refresh_token, expires_at, proxy_mode, proxy_url,
-  failure_count, cooldown_until, last_error, last_used_at, last_success_at,
+  failure_count, success_count, cooldown_until, last_error, last_used_at, last_success_at,
   last_refresh_at, consecutive_unauthorized, quarantine_fp, purge_after,
   billing_json, created_at, updated_at
 FROM accounts
@@ -930,16 +971,69 @@ WHERE id = ?`
 
 // ListAccounts 按 id 升序游标分页返回脱敏账号摘要。
 // 不 SELECT access_token/refresh_token 全文，仅用表达式生成 has_access/has_refresh 布尔。
-// afterID 为空表示首页；否则返回 id > afterID 的后续行。
-func (c *Catalog) ListAccounts(limit int, afterID string) ([]AccountSummary, error) {
+// AccountListFilter 账号列表筛选（管理台）。
+type AccountListFilter struct {
+	// Status: ""|alive|dead|enabled|disabled|cooldown|quarantine|no_token
+	Status string
+	// Lifecycle exact: active|quarantined|purged（可空）
+	Lifecycle string
+	// Query 匹配 id/email/name 子串（大小写不敏感）
+	Query string
+}
+
+// ListAccounts 按 id 升序游标分页返回脱敏账号摘要。
+// filter 可选；afterID 为上一页最后 id（首页空）。
+func (c *Catalog) ListAccounts(limit int, afterID string, filter AccountListFilter) ([]AccountSummary, error) {
 	if c.db == nil {
 		return nil, ErrClosed
 	}
 	if limit <= 0 {
 		return nil, fmt.Errorf("%w: limit must be > 0", ErrInvalidInput)
 	}
+	now := time.Now().Unix()
+	where := []string{"(? = '' OR id > ?)"}
+	args := []any{afterID, afterID}
 
-	const q = `
+	st := strings.ToLower(strings.TrimSpace(filter.Status))
+	switch st {
+	case "", "all":
+	case "alive":
+		where = append(where, "enabled = 1", "manual_disabled = 0", "lifecycle = ?", "cooldown_until <= ?",
+			"(access_token IS NOT NULL AND access_token != '' OR refresh_token IS NOT NULL AND refresh_token != '')")
+		args = append(args, LifecycleActive, now)
+	case "dead":
+		// 非存活：禁用/隔离/清理/冷却中/无令牌
+		where = append(where, `(enabled = 0 OR manual_disabled = 1 OR lifecycle != ? OR cooldown_until > ?
+			OR ((access_token IS NULL OR access_token = '') AND (refresh_token IS NULL OR refresh_token = '')))`)
+		args = append(args, LifecycleActive, now)
+	case "enabled":
+		where = append(where, "enabled = 1")
+	case "disabled":
+		where = append(where, "enabled = 0")
+	case "cooldown":
+		where = append(where, "cooldown_until > ?")
+		args = append(args, now)
+	case "quarantine", "quarantined":
+		where = append(where, "lifecycle = ?")
+		args = append(args, LifecycleQuarantined)
+	case "no_token":
+		where = append(where, "((access_token IS NULL OR access_token = '') AND (refresh_token IS NULL OR refresh_token = ''))")
+	default:
+		return nil, fmt.Errorf("%w: unknown status filter %q", ErrInvalidInput, filter.Status)
+	}
+
+	if lc := strings.TrimSpace(filter.Lifecycle); lc != "" {
+		where = append(where, "lifecycle = ?")
+		args = append(args, lc)
+	}
+	if q := strings.TrimSpace(filter.Query); q != "" {
+		like := "%" + strings.ToLower(q) + "%"
+		where = append(where, "(LOWER(id) LIKE ? OR LOWER(COALESCE(email,'')) LIKE ? OR LOWER(COALESCE(name,'')) LIKE ?)")
+		args = append(args, like, like, like)
+	}
+
+	args = append(args, limit)
+	sqlStr := `
 SELECT
   id,
   COALESCE(email, ''),
@@ -953,17 +1047,19 @@ SELECT
   expires_at,
   cooldown_until,
   failure_count,
+  success_count,
+  last_success_at,
   revision,
   (access_token IS NOT NULL AND access_token != '') AS has_access,
   (refresh_token IS NOT NULL AND refresh_token != '') AS has_refresh,
   COALESCE(last_error, ''),
   last_used_at
 FROM accounts
-WHERE (? = '' OR id > ?)
+WHERE ` + strings.Join(where, " AND ") + `
 ORDER BY id ASC
 LIMIT ?`
 
-	rows, err := c.db.Query(q, afterID, afterID, limit)
+	rows, err := c.db.Query(sqlStr, args...)
 	if err != nil {
 		return nil, fmt.Errorf("catalog: list accounts: %w", err)
 	}
@@ -972,17 +1068,18 @@ LIMIT ?`
 	out := make([]AccountSummary, 0, limit)
 	for rows.Next() {
 		var (
-			s        AccountSummary
-			enabled  int
-			manual   int
-			hasAcc   int
-			hasRef   int
-			lastUsed sql.NullInt64
+			s           AccountSummary
+			enabled     int
+			manual      int
+			hasAcc      int
+			hasRef      int
+			lastUsed    sql.NullInt64
+			lastSuccess sql.NullInt64
 		)
 		if err := rows.Scan(
 			&s.ID, &s.Email, &s.Name, &s.Lifecycle, &s.ProxyMode, &s.ProxyURL,
 			&s.Priority, &enabled, &manual, &s.ExpiresAt, &s.CooldownUntil,
-			&s.FailureCount, &s.Revision, &hasAcc, &hasRef, &s.LastError, &lastUsed,
+			&s.FailureCount, &s.SuccessCount, &lastSuccess, &s.Revision, &hasAcc, &hasRef, &s.LastError, &lastUsed,
 		); err != nil {
 			return nil, fmt.Errorf("catalog: list accounts scan: %w", err)
 		}
@@ -991,6 +1088,15 @@ LIMIT ?`
 		s.HasAccess = hasAcc != 0
 		s.HasRefresh = hasRef != 0
 		s.LastUsedAt = nullInt64Ptr(lastUsed)
+		s.LastSuccessAt = nullInt64Ptr(lastSuccess)
+		// alive
+		s.Alive = s.Enabled && !s.ManualDisabled && s.Lifecycle == LifecycleActive &&
+			s.CooldownUntil <= now && (s.HasAccess || s.HasRefresh)
+		total := s.SuccessCount + s.FailureCount
+		if total > 0 {
+			rate := float64(s.SuccessCount) / float64(total)
+			s.SuccessRate = &rate
+		}
 		out = append(out, s)
 	}
 	if err := rows.Err(); err != nil {
@@ -998,6 +1104,58 @@ LIMIT ?`
 	}
 	return out, nil
 }
+
+// CountAccountsFiltered 按与 ListAccounts 相同筛选条件计数。
+func (c *Catalog) CountAccountsFiltered(filter AccountListFilter) (int, error) {
+	if c.db == nil {
+		return 0, ErrClosed
+	}
+	now := time.Now().Unix()
+	where := []string{"1=1"}
+	args := []any{}
+	st := strings.ToLower(strings.TrimSpace(filter.Status))
+	switch st {
+	case "", "all":
+	case "alive":
+		where = append(where, "enabled = 1", "manual_disabled = 0", "lifecycle = ?", "cooldown_until <= ?",
+			"(access_token IS NOT NULL AND access_token != '' OR refresh_token IS NOT NULL AND refresh_token != '')")
+		args = append(args, LifecycleActive, now)
+	case "dead":
+		where = append(where, `(enabled = 0 OR manual_disabled = 1 OR lifecycle != ? OR cooldown_until > ?
+			OR ((access_token IS NULL OR access_token = '') AND (refresh_token IS NULL OR refresh_token = '')))`)
+		args = append(args, LifecycleActive, now)
+	case "enabled":
+		where = append(where, "enabled = 1")
+	case "disabled":
+		where = append(where, "enabled = 0")
+	case "cooldown":
+		where = append(where, "cooldown_until > ?")
+		args = append(args, now)
+	case "quarantine", "quarantined":
+		where = append(where, "lifecycle = ?")
+		args = append(args, LifecycleQuarantined)
+	case "no_token":
+		where = append(where, "((access_token IS NULL OR access_token = '') AND (refresh_token IS NULL OR refresh_token = ''))")
+	default:
+		return 0, fmt.Errorf("%w: unknown status filter %q", ErrInvalidInput, filter.Status)
+	}
+	if lc := strings.TrimSpace(filter.Lifecycle); lc != "" {
+		where = append(where, "lifecycle = ?")
+		args = append(args, lc)
+	}
+	if q := strings.TrimSpace(filter.Query); q != "" {
+		like := "%" + strings.ToLower(q) + "%"
+		where = append(where, "(LOWER(id) LIKE ? OR LOWER(COALESCE(email,'')) LIKE ? OR LOWER(COALESCE(name,'')) LIKE ?)")
+		args = append(args, like, like, like)
+	}
+	var n int
+	err := c.db.QueryRow(`SELECT COUNT(*) FROM accounts WHERE `+strings.Join(where, " AND "), args...).Scan(&n)
+	if err != nil {
+		return 0, err
+	}
+	return n, nil
+}
+
 
 // Stats 返回冷存储的聚合计数。
 func (c *Catalog) Stats() (CatalogStats, error) {
@@ -1048,7 +1206,7 @@ func scanAccount(row scannable) (Account, error) {
 	err := row.Scan(
 		&a.ID, &a.Revision, &identityKey, &email, &name, &a.Priority, &enabled, &manual,
 		&a.Lifecycle, &a.AccessToken, &a.RefreshToken, &a.ExpiresAt, &proxyMode, &proxyURL,
-		&a.FailureCount, &a.CooldownUntil, &lastError, &lastUsed, &lastSuccess,
+		&a.FailureCount, &a.SuccessCount, &a.CooldownUntil, &lastError, &lastUsed, &lastSuccess,
 		&lastRefresh, &a.ConsecutiveUnauthorized, &quarantineFP, &purgeAfter,
 		&billingJSON, &a.CreatedAt, &a.UpdatedAt,
 	)

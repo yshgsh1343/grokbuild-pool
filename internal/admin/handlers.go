@@ -299,8 +299,15 @@ func (h *Handlers) PoolStats(w http.ResponseWriter, r *http.Request) {
 	if h.Catalog != nil {
 		if st, err := h.Catalog.Stats(); err == nil {
 			out["catalog_count"] = st.Count
+			out["catalog_enabled"] = st.EnabledCount
+			out["catalog_active"] = st.ActiveCount
+			out["catalog_disabled"] = st.DisabledCount
+			out["catalog_cooldown"] = st.CooldownCount
 			out["catalog_quarantine"] = st.QuarantineCount
 			out["pool_quarantine_count"] = st.QuarantineCount
+			// 可用账号：启用且 active（冷却/隔离另计）
+			out["accounts_available"] = st.ActiveCount
+			out["accounts_total"] = st.Count
 		}
 	}
 	writeJSON(w, http.StatusOK, out)

@@ -35,6 +35,7 @@ type Account struct {
 	ProxyMode               string
 	ProxyURL                string
 	FailureCount            int
+	SuccessCount            int
 	CooldownUntil           int64 // unix seconds; 0 = none
 	LastError               string
 	LastUsedAt              *int64
@@ -61,6 +62,7 @@ type HealthPatch struct {
 	ManualDisabled          *bool
 	Lifecycle               *string
 	FailureCount            *int
+	SuccessCount            *int
 	CooldownUntil           *int64
 	LastError               *string
 	LastUsedAt              *int64
@@ -116,11 +118,17 @@ type AccountSummary struct {
 	ExpiresAt      int64  `json:"expires_at"`
 	CooldownUntil  int64  `json:"cooldown_until"`
 	FailureCount   int64  `json:"failure_count"`
+	SuccessCount   int64  `json:"success_count"`
+	LastSuccessAt  *int64 `json:"last_success_at,omitempty"`
 	Revision       int64  `json:"revision"`
 	HasAccess      bool   `json:"has_access"`
 	HasRefresh     bool   `json:"has_refresh"`
 	LastError      string `json:"last_error"`
 	LastUsedAt     *int64 `json:"last_used_at,omitempty"`
+	// Alive 运行态：启用+active+有令牌+未冷却
+	Alive bool `json:"alive"`
+	// SuccessRate = success/(success+failure)；无样本时为 null（JSON 省略用指针）
+	SuccessRate *float64 `json:"success_rate,omitempty"`
 }
 
 // ProxyAssignment 批量设置代理的一项（SetProxies）。

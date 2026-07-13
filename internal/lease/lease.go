@@ -247,15 +247,19 @@ func (m *Manager) Release(ctx context.Context, lease Lease, result Result) error
 
 func (m *Manager) releaseSuccess(lease Lease, now int64) error {
 	used := now
-	ok := true
 	zero := 0
+	sc := 1
+	// 合并已有 success_count（读失败时仍记 1，不阻断 release）
+	if cur, err := m.cat.Get(lease.AccountID); err == nil {
+		sc = cur.SuccessCount + 1
+	}
 	patch := catalog.HealthPatch{
+		SuccessCount:            &sc,
 		LastSuccessAt:           &used,
 		LastUsedAt:              &used,
 		ConsecutiveUnauthorized: &zero,
 		ClearLastError:          true,
 	}
-	_ = ok
 	if err := m.cat.PatchHealth(lease.AccountID, patch); err != nil {
 		if errors.Is(err, catalog.ErrNotFound) {
 			return nil // 账号已不存在；inflight 已扣减

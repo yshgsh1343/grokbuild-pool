@@ -13,6 +13,9 @@ export const state = {
   accPageIndex: 1,
   accTotal: 0,
   accStats: null,
+  accFilterStatus: "",
+  accFilterLife: "",
+  accFilterQ: "",
   accLoading: false,
   // route leave animation generation token
   routeGen: 0,
