@@ -134,6 +134,8 @@ function accountStatusBadges(a) {
   var parts = [];
   if (a.alive) parts.push('<span class="badge on">存活</span>');
   else parts.push('<span class="badge off">不可用</span>');
+  if (a.billing && a.billing.probe_ok === true) parts.push('<span class="badge on">测活OK</span>');
+  else if (a.billing && a.billing.probe_ok === false) parts.push('<span class="badge off">测活失败</span>');
   var life = String(a.lifecycle || "").toLowerCase();
   if (life === "quarantined") {
     parts.push('<span class="badge badge-warn">隔离</span>');
@@ -375,6 +377,9 @@ export function renderAccounts() {
     '<option value="">全部</option>' +
     '<option value="alive">存活</option>' +
     '<option value="dead">不可用</option>' +
+    '<option value="probe_ok">测活OK</option>' +
+    '<option value="probe_fail">测活失败</option>' +
+    '<option value="unprobed">未测活</option>' +
     '<option value="enabled">启用</option>' +
     '<option value="disabled">禁用</option>' +
     '<option value="cooldown">冷却中</option>' +

@@ -22,7 +22,7 @@ type AccountProbeClient interface {
 
 // ProbeAccount POST /admin/accounts/{id}/probe
 // 用账号 access_token 拉上游 /billing（+ credits），写回 billing_json，返回脱敏额度与 probe 结果。
-// 不因测活失败自动隔离/禁用；仅更新 last_error / billing 快照，供管理台决策。
+// 成功：Promote 进热池（若启用/active）；失败：Demote 出热池。不自动隔离/禁用账号。
 func (h *Handlers) ProbeAccount(w http.ResponseWriter, r *http.Request) {
 	id := strings.TrimSpace(r.PathValue("id"))
 	if id == "" {
@@ -209,11 +209,10 @@ func (h *Handlers) probeOne(ctx context.Context, id string) (map[string]any, err
 	raw, _ := json.Marshal(store)
 	billingStr := string(raw)
 
-	// 健康补丁：写 billing；失败时记 last_error（不自动隔离）
+	// 健康补丁：写 billing；失败时记 last_error（不自动隔离/禁用）
 	patch := catalog.HealthPatch{BillingJSON: &billingStr}
 	if probeOK {
 		patch.ClearLastError = true
-		// 轻量成功计数 +1（测活也算一次可用探测）
 		sc := acc.SuccessCount + 1
 		patch.SuccessCount = &sc
 		ls := now
@@ -221,21 +220,49 @@ func (h *Handlers) probeOne(ctx context.Context, id string) (map[string]any, err
 	} else {
 		msg := "probe: " + truncateStr(probeErr, 200)
 		patch.LastError = &msg
-		// 401/403 记失败但不自动隔离（管理台可见）
-		if probeStatus == http.StatusUnauthorized || probeStatus == http.StatusForbidden ||
-			probeStatus == http.StatusPaymentRequired {
-			fc := acc.FailureCount + 1
-			patch.FailureCount = &fc
-		}
+		fc := acc.FailureCount + 1
+		patch.FailureCount = &fc
 	}
 	if err := h.Catalog.PatchHealth(id, patch); err != nil {
 		return nil, err
 	}
 
+	// 热池同步：成功则 Promote（可调度），失败则 Demote（立刻不可选）
+	hotAction := "none"
+	if h.AccountHot != nil {
+		if probeOK {
+			// 重新读一次拿 revision；用本地合并字段构造 HotMeta
+			if cur, err := h.Catalog.Get(id); err == nil {
+				meta := catalog.HotMetaFromAccount(cur)
+				// 保留热池 inflight
+				if old, ok := h.AccountHot.Get(id); ok {
+					meta.Inflight = old.Inflight
+				}
+				if meta.Enabled && meta.Lifecycle == catalog.LifecycleActive && meta.CooldownUntil <= now {
+					_, _ = h.AccountHot.Promote(meta)
+					hotAction = "promote"
+				} else {
+					_ = h.AccountHot.Demote(id)
+					hotAction = "demote"
+				}
+			}
+		} else {
+			_ = h.AccountHot.Demote(id)
+			hotAction = "demote"
+		}
+	}
+
 	view := catalog.ParseAccountBillingView(billingStr)
+	// alive 与列表一致：基础可用且本次 probe_ok
+	baseAlive := acc.Enabled && !acc.ManualDisabled && acc.Lifecycle == catalog.LifecycleActive &&
+		acc.CooldownUntil <= now && (strings.TrimSpace(acc.AccessToken) != "" || strings.TrimSpace(acc.RefreshToken) != "")
+	alive := baseAlive && probeOK
+
 	out := map[string]any{
 		"id":         id,
 		"probe_ok":   probeOK,
+		"alive":      alive,
+		"hot":        hotAction,
 		"probed_at":  now,
 		"proxy_url":  acc.ProxyURL,
 		"proxy_mode": acc.ProxyMode,

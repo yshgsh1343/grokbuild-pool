@@ -791,26 +791,37 @@ func (c *Catalog) ListEligible(limit int, afterID string) ([]HotMeta, error) {
 		err  error
 	)
 	// 键集分页：提供 afterID 时以其 (priority, id) 为起点。
+	// probe_ok=false 不进热池；未测活或 probe_ok=true/缺字段仍可进。
 	if afterID == "" {
-		const q = `
+		q := `
 SELECT id, revision, identity_key, priority, enabled, lifecycle,
   cooldown_until, expires_at, failure_count, proxy_mode, proxy_url
 FROM accounts
 WHERE enabled = 1
+  AND manual_disabled = 0
   AND lifecycle = ?
   AND cooldown_until <= ?
+  AND (access_token IS NOT NULL AND access_token != '')
+  AND (billing_json IS NULL OR billing_json = ''
+    OR json_extract(billing_json, '$.probe_ok') IS NULL
+    OR json_extract(billing_json, '$.probe_ok') = 1)
 ORDER BY priority DESC, id ASC
 LIMIT ?`
 		rows, err = c.db.Query(q, LifecycleActive, now, limit)
 	} else {
-		const q = `
+		q := `
 SELECT a.id, a.revision, a.identity_key, a.priority, a.enabled, a.lifecycle,
   a.cooldown_until, a.expires_at, a.failure_count, a.proxy_mode, a.proxy_url
 FROM accounts a
 JOIN accounts cur ON cur.id = ?
 WHERE a.enabled = 1
+  AND a.manual_disabled = 0
   AND a.lifecycle = ?
   AND a.cooldown_until <= ?
+  AND (a.access_token IS NOT NULL AND a.access_token != '')
+  AND (a.billing_json IS NULL OR a.billing_json = ''
+    OR json_extract(a.billing_json, '$.probe_ok') IS NULL
+    OR json_extract(a.billing_json, '$.probe_ok') = 1)
   AND (
     a.priority < cur.priority
     OR (a.priority = cur.priority AND a.id > cur.id)
@@ -998,14 +1009,26 @@ func (c *Catalog) ListAccounts(limit int, afterID string, filter AccountListFilt
 	switch st {
 	case "", "all":
 	case "alive":
+		// 基础可用，且（未测活 或 probe_ok=true）
 		where = append(where, "enabled = 1", "manual_disabled = 0", "lifecycle = ?", "cooldown_until <= ?",
-			"(access_token IS NOT NULL AND access_token != '' OR refresh_token IS NOT NULL AND refresh_token != '')")
+			"(access_token IS NOT NULL AND access_token != '' OR refresh_token IS NOT NULL AND refresh_token != '')",
+			`(billing_json IS NULL OR billing_json = ''
+			  OR json_extract(billing_json, '$.probe_ok') IS NULL
+			  OR json_extract(billing_json, '$.probe_ok') = 1)`)
 		args = append(args, LifecycleActive, now)
 	case "dead":
-		// 非存活：禁用/隔离/清理/冷却中/无令牌
+		// 非存活：基础不可用，或已测活失败
 		where = append(where, `(enabled = 0 OR manual_disabled = 1 OR lifecycle != ? OR cooldown_until > ?
-			OR ((access_token IS NULL OR access_token = '') AND (refresh_token IS NULL OR refresh_token = '')))`)
+			OR ((access_token IS NULL OR access_token = '') AND (refresh_token IS NULL OR refresh_token = ''))
+			OR json_extract(billing_json, '$.probe_ok') = 0)`)
 		args = append(args, LifecycleActive, now)
+	case "probe_ok":
+		where = append(where, "json_extract(billing_json, '$.probe_ok') = 1")
+	case "probe_fail", "probe_failed":
+		where = append(where, "json_extract(billing_json, '$.probe_ok') = 0")
+	case "unprobed":
+		where = append(where, `(billing_json IS NULL OR billing_json = ''
+			OR json_extract(billing_json, '$.probe_ok') IS NULL)`)
 	case "enabled":
 		where = append(where, "enabled = 1")
 	case "disabled":
@@ -1092,15 +1115,23 @@ LIMIT ?`
 		s.HasRefresh = hasRef != 0
 		s.LastUsedAt = nullInt64Ptr(lastUsed)
 		s.LastSuccessAt = nullInt64Ptr(lastSuccess)
-		// alive
-		s.Alive = s.Enabled && !s.ManualDisabled && s.Lifecycle == LifecycleActive &&
+		// billing / probe 先解析，alive 可参考 probe_ok
+		s.Billing = ParseAccountBillingView(billingJSON)
+		// alive：基础可用 + 若已测活则必须 probe_ok
+		baseAlive := s.Enabled && !s.ManualDisabled && s.Lifecycle == LifecycleActive &&
 			s.CooldownUntil <= now && (s.HasAccess || s.HasRefresh)
+		if !baseAlive {
+			s.Alive = false
+		} else if s.Billing != nil && s.Billing.ProbeOK != nil {
+			s.Alive = *s.Billing.ProbeOK
+		} else {
+			s.Alive = true // 未测活：按冷存储启发式
+		}
 		total := s.SuccessCount + s.FailureCount
 		if total > 0 {
 			rate := float64(s.SuccessCount) / float64(total)
 			s.SuccessRate = &rate
 		}
-		s.Billing = ParseAccountBillingView(billingJSON)
 		out = append(out, s)
 	}
 	if err := rows.Err(); err != nil {
@@ -1122,12 +1153,23 @@ func (c *Catalog) CountAccountsFiltered(filter AccountListFilter) (int, error) {
 	case "", "all":
 	case "alive":
 		where = append(where, "enabled = 1", "manual_disabled = 0", "lifecycle = ?", "cooldown_until <= ?",
-			"(access_token IS NOT NULL AND access_token != '' OR refresh_token IS NOT NULL AND refresh_token != '')")
+			"(access_token IS NOT NULL AND access_token != '' OR refresh_token IS NOT NULL AND refresh_token != '')",
+			`(billing_json IS NULL OR billing_json = ''
+			  OR json_extract(billing_json, '$.probe_ok') IS NULL
+			  OR json_extract(billing_json, '$.probe_ok') = 1)`)
 		args = append(args, LifecycleActive, now)
 	case "dead":
 		where = append(where, `(enabled = 0 OR manual_disabled = 1 OR lifecycle != ? OR cooldown_until > ?
-			OR ((access_token IS NULL OR access_token = '') AND (refresh_token IS NULL OR refresh_token = '')))`)
+			OR ((access_token IS NULL OR access_token = '') AND (refresh_token IS NULL OR refresh_token = ''))
+			OR json_extract(billing_json, '$.probe_ok') = 0)`)
 		args = append(args, LifecycleActive, now)
+	case "probe_ok":
+		where = append(where, "json_extract(billing_json, '$.probe_ok') = 1")
+	case "probe_fail", "probe_failed":
+		where = append(where, "json_extract(billing_json, '$.probe_ok') = 0")
+	case "unprobed":
+		where = append(where, `(billing_json IS NULL OR billing_json = ''
+			OR json_extract(billing_json, '$.probe_ok') IS NULL)`)
 	case "enabled":
 		where = append(where, "enabled = 1")
 	case "disabled":
