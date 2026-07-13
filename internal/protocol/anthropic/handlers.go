@@ -67,6 +67,23 @@ func cloneAnthropic(in config.AnthropicConfig) config.AnthropicConfig {
 	return out
 }
 
+// LiveAliases 返回热更后的模型别名副本（供 /v1/models 列表使用）。
+func (h *Handlers) LiveAliases() map[string]string {
+	if h == nil {
+		return nil
+	}
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	if len(h.Cfg.ModelAliases) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(h.Cfg.ModelAliases))
+	for k, v := range h.Cfg.ModelAliases {
+		out[k] = v
+	}
+	return out
+}
+
 // liveCfg 读取当前配置（请求路径用）。
 func (h *Handlers) liveCfg() config.AnthropicConfig {
 	if h == nil {

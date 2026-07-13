@@ -1509,13 +1509,12 @@
         }
         if (limits.max_entries) importMaxEntries = Number(limits.max_entries) || importMaxEntries;
         if (note) {
-          // 以条数为主闸门；max_upload_bytes=0 表示不限体积
           var sizeHint = (!importMaxUpload || importMaxUpload <= 0)
             ? "不限体积"
             : ("体积兜底 " + Math.round(importMaxUpload / 1048576) + " MiB");
           note.textContent = "默认 SSO→JSON · 最多 " + importMaxEntries +
             " 条 · " + sizeHint + " · 转换器" +
-            (limits.sso_converter_configured ? "已就绪（内置 Go Device Flow 或远程）" : "未就绪");
+            (limits.sso_converter_configured ? "已就绪（内置 Go Device Flow）" : "未就绪");
         }
         var host = $("impTable");
         if (!host) return;

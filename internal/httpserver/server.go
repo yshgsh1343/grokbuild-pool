@@ -251,11 +251,19 @@ func handleModels(w http.ResponseWriter, r *http.Request, opts Options) {
 		})
 	}
 	// Claude Code 与常见 Grok id 的静态发现（不调真实上游）。
-	for alias, target := range opts.Config.Anthropic.ModelAliases {
+	// 优先管理台热更后的别名；否则用启动 Config。
+	aliases := opts.Config.Anthropic.ModelAliases
+	if opts.Anthropic != nil {
+		if live := opts.Anthropic.LiveAliases(); len(live) > 0 {
+			aliases = live
+		}
+	}
+	for alias, target := range aliases {
 		add(alias, "anthropic")
 		add(target, "xai")
 	}
 	add("grok-4.5", "xai")
+	add("grok-composer-2.5-fast", "xai")
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)

@@ -161,9 +161,8 @@ func (h *Handlers) createUploadImportJob(w http.ResponseWriter, r *http.Request)
 			return
 		}
 	}
-	if !formatSeen || format == "" {
-		writeErr(w, http.StatusBadRequest, "缺少 format 字段")
-		return
+	if format == "" {
+		format = "sso" // 默认 SSO→JSON
 	}
 	if !fileSeen || upload.Path == "" {
 		writeErr(w, http.StatusBadRequest, "缺少 file 字段")
@@ -177,6 +176,7 @@ func (h *Handlers) createUploadImportJob(w http.ResponseWriter, r *http.Request)
 	upload = importjobs.StagedUpload{}
 	writeJSON(w, http.StatusAccepted, job)
 }
+
 
 func writeImportJobError(w http.ResponseWriter, err error) {
 	switch {

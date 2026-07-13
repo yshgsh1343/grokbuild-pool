@@ -104,7 +104,7 @@ func printUsage(w *os.File) {
 	fmt.Fprintf(w, "  poolctl prove --count N --data-dir path [--full140k]\n")
 	fmt.Fprintf(w, "  poolctl canary-init --db path   # empty catalog for M12 (default data/canary.db)\n")
 	fmt.Fprintf(w, "note: SSO conversion requires a converter service (--converter-url); see specs/import.md\n")
-	fmt.Fprintf(w, "isolation: work only under /opt/grokbuild-pool; never touch /root/grokbuild-proxy\n")
+	fmt.Fprintf(w, "note: prefer relative --db/--data-dir under ./data for local use\n")
 }
 
 func runGen(args []string) error {
@@ -386,7 +386,7 @@ func runBulkImport(args []string, forcedFormat string) error {
 func runProve(args []string) error {
 	fs := flag.NewFlagSet("prove", flag.ContinueOnError)
 	count := fs.Int("count", 10_000, "accounts to generate and import")
-	dataDir := fs.String("data-dir", "/opt/grokbuild-pool/data", "directory for ndjson + db")
+	dataDir := fs.String("data-dir", "./data", "directory for ndjson + db")
 	full := fs.Bool("full140k", false, "set count to 140000")
 	batch := fs.Int("batch", defaultBatch, "import batch size")
 	seed := fs.Int64("seed", 42, "RNG seed")
@@ -458,7 +458,7 @@ func runProve(args []string) error {
 // 不导入任何真号；不修改 STATUS.md / UNLOCK_M12。
 func runCanaryInit(args []string) error {
 	fs := flag.NewFlagSet("canary-init", flag.ContinueOnError)
-	dbPath := fs.String("db", "/opt/grokbuild-pool/data/canary.db", "empty canary catalog path")
+	dbPath := fs.String("db", "./data/canary.db", "empty canary catalog path")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}

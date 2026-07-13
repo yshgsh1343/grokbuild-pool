@@ -1,16 +1,20 @@
 # build
 /bin/
 /dist/
+/pool-proxy
 *.exe
 *.test
 *.out
 
-# data & local state (never commit tokens)
+# data & local state (never commit tokens/db)
 /data/
 *.db
 *.db-wal
 *.db-shm
 *.ndjson
+.env
+*.local.yaml
+settings.json
 
 # profiles / benches
 *.pprof
@@ -18,16 +22,9 @@
 cpu.out
 mem.out
 
-# IDE / OS
+# IDE / OS / agent
 .idea/
 .vscode/
 .DS_Store
-
-# local env
-.env
-*.local.yaml
-
-# local agent state
 .claude/
 __pycache__/
-/pool-proxy

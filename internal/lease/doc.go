@@ -9,5 +9,5 @@
 //   - 因此「会话粘性 = 账号粘性 = 代理粘性」，同一 stickyKey 会话不会在账号间漂移代理。
 // 详见 phases/ANTIBAN_P1.md。
 //
-// Scheme B 模块 M07 — 见 /opt/grokbuild-pool/specs/lease.md。
+// Scheme B 租约选号模块。
 package lease
