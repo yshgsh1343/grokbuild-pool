@@ -59,6 +59,8 @@ type Config struct {
 	MaxSSOValueBytes int
 	// OnProgress 以累计成功数回调（可选）。
 	OnProgress func(ok int, elapsed time.Duration, rssMB float64)
+	// OnDetailProgress 细粒度进度 total/ok/failed/phase（parsing|converting|writing）。
+	OnDetailProgress func(total, ok, failed int, phase string)
 	// Now 覆盖墙钟（测试用）。
 	Now func() time.Time
 }
@@ -338,6 +340,9 @@ func processFile(ctx context.Context, file InputFile, cfg Config) (FileResult, [
 		return fr, out
 
 	case FormatSSO:
+		if cfg.OnDetailProgress != nil {
+			cfg.OnDetailProgress(0, 0, 0, "parsing")
+		}
 		values, err := ssoimport.ParseSSOValuesBounded(data, cfg.MaxEntries, cfg.MaxSSOValueBytes)
 		if err != nil {
 			fr.Error = err.Error()
@@ -345,6 +350,9 @@ func processFile(ctx context.Context, file InputFile, cfg Config) (FileResult, [
 			return fr, nil
 		}
 		fr.Total = len(values)
+		if cfg.OnDetailProgress != nil {
+			cfg.OnDetailProgress(fr.Total, 0, 0, "converting")
+		}
 		if cfg.Converter == nil {
 			fr.Error = ssoimport.ErrConverterRequired.Error()
 			fr.Failed = len(values)
@@ -355,39 +363,62 @@ func processFile(ctx context.Context, file InputFile, cfg Config) (FileResult, [
 			fr.Failed = len(values)
 			return fr, nil
 		}
-		converted, err := cfg.Converter.Convert(ctx, values)
-		if err != nil {
-			fr.Error = err.Error()
-			fr.Failed = len(values)
-			return fr, nil
+		// 分块换票：每块完成后立刻回调进度（SSO 远慢于 JSON）
+		chunk := 16
+		if cfg.Workers >= 8 {
+			chunk = 24
 		}
-		if err := ctx.Err(); err != nil {
-			fr.Error = err.Error()
-			fr.Failed = len(values)
-			return fr, nil
+		if cfg.Workers >= 12 {
+			chunk = 32
 		}
 		now := time.Now()
 		if cfg.Now != nil {
 			now = cfg.Now()
 		}
-		out := make([]catalog.Account, 0, len(converted))
-		for _, c := range converted {
+		out := make([]catalog.Account, 0, len(values))
+		for i := 0; i < len(values); i += chunk {
 			if err := ctx.Err(); err != nil {
 				fr.Error = err.Error()
-				fr.Failed += len(converted) - len(out)
-				return fr, nil
+				remain := len(values) - fr.OK - fr.Failed
+				if remain > 0 {
+					fr.Failed += remain
+				}
+				return fr, out
 			}
-			if c.Error != "" {
-				fr.Failed++
-				continue
+			end := i + chunk
+			if end > len(values) {
+				end = len(values)
 			}
-			a, err := ssoimport.ToAccount(c, now)
+			part, err := cfg.Converter.Convert(ctx, values[i:end])
 			if err != nil {
-				fr.Failed++
+				fr.Failed += end - i
+				if fr.Error == "" {
+					fr.Error = err.Error()
+				}
+				if cfg.OnDetailProgress != nil {
+					cfg.OnDetailProgress(fr.Total, fr.OK, fr.Failed, "converting")
+				}
 				continue
 			}
-			out = append(out, a)
-			fr.OK++
+			for _, c := range part {
+				if c.Error != "" {
+					fr.Failed++
+					continue
+				}
+				a, err := ssoimport.ToAccount(c, now)
+				if err != nil {
+					fr.Failed++
+					continue
+				}
+				out = append(out, a)
+				fr.OK++
+			}
+			if cfg.OnDetailProgress != nil {
+				cfg.OnDetailProgress(fr.Total, fr.OK, fr.Failed, "converting")
+			}
+		}
+		if cfg.OnDetailProgress != nil {
+			cfg.OnDetailProgress(fr.Total, fr.OK, fr.Failed, "writing")
 		}
 		return fr, out
 

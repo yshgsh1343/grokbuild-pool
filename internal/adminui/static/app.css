@@ -1645,3 +1645,44 @@ tr.tok-detail-row.hidden {
 .rate-ok { color: var(--color-success); font-weight: 600; }
 .rate-mid { color: #b45309; font-weight: 600; }
 .rate-bad { color: var(--color-danger); font-weight: 600; }
+
+
+/* Import progress */
+.imp-progress { min-width: 180px; }
+.imp-progress-meta {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 12px;
+  margin-bottom: 4px;
+}
+.imp-track {
+  height: 8px;
+  border-radius: 999px;
+  background: var(--color-bg-subtle);
+  border: 1px solid var(--color-border-default);
+  overflow: hidden;
+}
+.imp-bar {
+  height: 100%;
+  width: 0;
+  background: color-mix(in srgb, var(--color-text-primary) 75%, #3b82f6);
+  transition: width 0.35s ease;
+}
+.imp-bar.is-sso {
+  background: linear-gradient(90deg, #0284c7, #38bdf8);
+}
+.imp-bar.is-ok { background: var(--color-success); }
+.imp-bar.is-bad { background: var(--color-danger); }
+.imp-active-row {
+  display: grid;
+  grid-template-columns: 140px 1fr 1.4fr;
+  gap: 10px;
+  align-items: center;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--color-border-default);
+}
+.imp-active-row:last-child { border-bottom: 0; }
+@media (max-width: 800px) {
+  .imp-active-row { grid-template-columns: 1fr; }
+}

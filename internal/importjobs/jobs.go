@@ -50,6 +50,8 @@ type Job struct {
 	OK         int       `json:"ok"`
 	Fail       int       `json:"fail"`
 	Skipped    int       `json:"skipped,omitempty"`
+	Phase      string    `json:"phase,omitempty"`
+	Message    string    `json:"message,omitempty"`
 	Error      string    `json:"error,omitempty"`
 	Started    time.Time `json:"started,omitempty"`
 	Finished   time.Time `json:"finished,omitempty"`
@@ -614,11 +616,44 @@ func (m *Manager) run(id string, input jobInput, format string) {
 		MaxEntries:         m.opts.MaxEntries,
 		MaxNDJSONLineBytes: m.opts.MaxNDJSONLineBytes,
 		MaxSSOValueBytes:   m.opts.MaxSSOValueBytes,
+		ProgressEvery:      25,
+	}
+	cfg.OnDetailProgress = func(total, ok, failed int, phase string) {
+		m.patch(id, func(j *Job) {
+			if total > j.Total {
+				j.Total = total
+			}
+			if ok >= 0 {
+				j.OK = ok
+			}
+			if failed >= 0 {
+				j.Fail = failed
+			}
+			if phase != "" {
+				j.Phase = phase
+				switch phase {
+				case "parsing":
+					j.Message = "解析输入"
+				case "converting":
+					j.Message = "SSO 换票中（Device Flow）"
+				case "writing":
+					j.Message = "写入账号库"
+				case "reloading":
+					j.Message = "重建热池"
+				default:
+					j.Message = phase
+				}
+			}
+		})
 	}
 	cfg.OnProgress = func(ok int, _ time.Duration, _ float64) {
 		m.patch(id, func(j *Job) {
 			if ok > j.OK {
 				j.OK = ok
+			}
+			if j.Phase == "" || j.Phase == "converting" || j.Phase == "parsing" {
+				j.Phase = "writing"
+				j.Message = "写入账号库"
 			}
 		})
 	}
@@ -627,6 +662,15 @@ func (m *Manager) run(id string, input jobInput, format string) {
 	defer cancel()
 	rep, err := bulkimport.ImportPaths(ctx, m.cat, input.path, cfg)
 	if err == nil && m.opts.AfterImport != nil {
+		m.patch(id, func(j *Job) {
+			j.Phase = "reloading"
+			j.Message = "重建热池"
+			if rep.Total > 0 {
+				j.Total = rep.Total
+			}
+			j.OK = rep.OK
+			j.Fail = rep.Failed
+		})
 		err = m.opts.AfterImport()
 	}
 	finished := time.Now().UTC()
@@ -638,6 +682,8 @@ func (m *Manager) run(id string, input jobInput, format string) {
 			j.OK = rep.OK
 			j.Fail = rep.Failed
 			j.Skipped = rep.Skipped
+			j.Phase = "done"
+			j.Message = "失败"
 			j.Finished = finished
 		})
 		completed = true
@@ -649,10 +695,13 @@ func (m *Manager) run(id string, input jobInput, format string) {
 		j.OK = rep.OK
 		j.Fail = rep.Failed
 		j.Skipped = rep.Skipped
+		j.Phase = "done"
+		j.Message = "完成"
 		j.Finished = finished
 		if rep.Failed > 0 && rep.OK == 0 {
 			j.State = StateFailed
 			j.Error = "all entries failed"
+			j.Message = "失败"
 			if len(rep.Files) > 0 && strings.TrimSpace(rep.Files[0].Error) != "" {
 				j.Error = safeJobError(errors.New(rep.Files[0].Error), input.path, m.dataDir)
 			}
