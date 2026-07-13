@@ -26,7 +26,7 @@ type adminStack struct {
 
 // wireAdmin 管线第 4 步：tokens.db → settings 热更新 → import jobs（SSO 并行转换）→ admin API。
 func wireAdmin(cfg config.Config, pool *poolStack, up *upstreamStack, metrics *httpserver.Metrics, version string, logger *slog.Logger) *adminStack {
-	if err := os.MkdirAll(cfg.DataDir, 0o755); err != nil {
+	if err := os.MkdirAll(cfg.DataDir, 0o700); err != nil {
 		fail(logger, "data_dir", err)
 	}
 	tokenDB := filepath.Join(cfg.DataDir, "tokens.db")

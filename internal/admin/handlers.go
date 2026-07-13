@@ -1,12 +1,16 @@
 package admin
 
 import (
+	"crypto/sha256"
+	"crypto/subtle"
 	"encoding/json"
 	"errors"
 	"io"
+	"net"
 	"net/http"
 	"runtime"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/yshgsh1343/grokbuild2api/internal/catalog"
@@ -14,6 +18,106 @@ import (
 	"github.com/yshgsh1343/grokbuild2api/internal/config"
 	"github.com/yshgsh1343/grokbuild2api/internal/importjobs"
 )
+
+// adminAuthLimiter 进程内管理鉴权失败限速（按客户端 IP）。
+type adminAuthLimiter struct {
+	mu      sync.Mutex
+	fails   map[string]*adminAuthWindow
+	limit   int
+	window  time.Duration
+}
+
+type adminAuthWindow struct {
+	start time.Time
+	count int
+}
+
+var defaultAdminAuthLimiter = &adminAuthLimiter{
+	fails:  make(map[string]*adminAuthWindow),
+	limit:  20,
+	window: time.Minute,
+}
+
+func (l *adminAuthLimiter) allow(ip string) bool {
+	if l == nil {
+		return true
+	}
+	ip = strings.TrimSpace(ip)
+	if ip == "" {
+		ip = "unknown"
+	}
+	now := time.Now()
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.fails == nil {
+		l.fails = make(map[string]*adminAuthWindow)
+	}
+	w := l.fails[ip]
+	if w == nil || now.Sub(w.start) >= l.window {
+		l.fails[ip] = &adminAuthWindow{start: now, count: 0}
+		w = l.fails[ip]
+	}
+	if w.count >= l.limit {
+		return false
+	}
+	return true
+}
+
+func (l *adminAuthLimiter) fail(ip string) {
+	if l == nil {
+		return
+	}
+	ip = strings.TrimSpace(ip)
+	if ip == "" {
+		ip = "unknown"
+	}
+	now := time.Now()
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.fails == nil {
+		l.fails = make(map[string]*adminAuthWindow)
+	}
+	w := l.fails[ip]
+	if w == nil || now.Sub(w.start) >= l.window {
+		l.fails[ip] = &adminAuthWindow{start: now, count: 1}
+		return
+	}
+	w.count++
+}
+
+func (l *adminAuthLimiter) success(ip string) {
+	if l == nil {
+		return
+	}
+	ip = strings.TrimSpace(ip)
+	if ip == "" {
+		return
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	delete(l.fails, ip)
+}
+
+func clientIP(r *http.Request) string {
+	if r == nil {
+		return ""
+	}
+	host, _, err := net.SplitHostPort(strings.TrimSpace(r.RemoteAddr))
+	if err == nil {
+		return host
+	}
+	return strings.TrimSpace(r.RemoteAddr)
+}
+
+// constantTimeAdminKeyEq 比较管理密钥：对两侧做 SHA-256 后常量时间比较，避免长度泄漏与逐字节计时。
+func constantTimeAdminKeyEq(got, want string) bool {
+	if want == "" {
+		return false
+	}
+	sumGot := sha256.Sum256([]byte(got))
+	sumWant := sha256.Sum256([]byte(want))
+	return subtle.ConstantTimeCompare(sumGot[:], sumWant[:]) == 1
+}
 
 // HotStats 热池只读指标（供仪表盘）。
 type HotStats interface {
@@ -61,6 +165,7 @@ func (h *Handlers) effectiveAdminKey() string {
 }
 
 // RequireAdmin 校验 admin_key（Bearer 或 x-admin-key）。
+// 使用摘要常量时间比较，并对失败尝试按 IP 限速。
 func (h *Handlers) RequireAdmin(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		want := ""
@@ -71,11 +176,19 @@ func (h *Handlers) RequireAdmin(next http.HandlerFunc) http.HandlerFunc {
 			writeErr(w, http.StatusServiceUnavailable, "未配置 admin_key")
 			return
 		}
+		ip := clientIP(r)
+		if !defaultAdminAuthLimiter.allow(ip) {
+			w.Header().Set("Retry-After", "60")
+			writeErr(w, http.StatusTooManyRequests, "admin 鉴权尝试过于频繁")
+			return
+		}
 		key := extractAdminKey(r)
-		if key == "" || key != want {
+		if !constantTimeAdminKeyEq(key, want) {
+			defaultAdminAuthLimiter.fail(ip)
 			writeErr(w, http.StatusUnauthorized, "admin 鉴权失败")
 			return
 		}
+		defaultAdminAuthLimiter.success(ip)
 		next(w, r)
 	}
 }
@@ -162,7 +275,9 @@ func (h *Handlers) PoolStats(w http.ResponseWriter, r *http.Request) {
 		"proxy_inflight":     inflight,
 		"pool_hot_size":      hotSize,
 		"pool_cooldown_size": cooldown,
-		"process_rss_bytes":  ms.Sys,
+		// 历史字段名 process_rss_bytes 实际为 MemStats.Sys，保留键名兼容并增加准确别名
+			"process_rss_bytes":  ms.Sys,
+			"process_sys_bytes":  ms.Sys,
 		"go_goroutines":      runtime.NumGoroutine(),
 		"tokens_total":       tokTotal,
 		"tokens_enabled":     tokEnabled,
@@ -191,7 +306,7 @@ func (h *Handlers) PoolStats(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, out)
 }
 
-// ListTokens 列出令牌（含 api_key 明文供管理台展开/批量复制；旧令牌可能为空）。
+// ListTokens 列出令牌（不含明文；仅创建时返回一次 api_key）。
 func (h *Handlers) ListTokens(w http.ResponseWriter, r *http.Request) {
 	if h.Tokens == nil {
 		writeErr(w, http.StatusServiceUnavailable, "令牌存储未启用")

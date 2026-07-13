@@ -262,7 +262,7 @@ func runBulkImport(args []string, forcedFormat string) error {
 	batch := fs.Int("batch", defaultBatch, "upsert batch size")
 	dryRun := fs.Bool("dry-run", false, "parse/convert only; do not write DB")
 	converterURL := fs.String("converter-url", "", "SSO converter base URL (…/v1/convert appended if missing)")
-	apiKey := fs.String("api-key", "", "SSO converter Bearer API key")
+	apiKey := fs.String("api-key", strings.TrimSpace(os.Getenv("SSO_CONVERTER_API_KEY")), "SSO converter Bearer API key (or env SSO_CONVERTER_API_KEY; prefer env over argv)")
 	allowInsecure := fs.Bool("allow-insecure", false, "allow http:// converter on loopback/private hosts")
 	timeoutSec := fs.Int("timeout-sec", 300, "SSO converter request timeout seconds")
 	if err := fs.Parse(args); err != nil {

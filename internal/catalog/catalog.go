@@ -1,6 +1,7 @@
 package catalog
 
 import (
+	"os"
 	"database/sql"
 	"fmt"
 	"strings"
@@ -67,6 +68,9 @@ func Open(path string) (*Catalog, error) {
 	if err != nil {
 		return nil, fmt.Errorf("catalog: open %s: %w", path, err)
 	}
+	// 尽量收紧库文件权限（Windows 上可能 no-op/失败，忽略错误）
+	_ = os.Chmod(path, 0o600)
+
 	// 并发负载下 WAL + modernc 最稳妥的是单写连接。
 	db.SetMaxOpenConns(1)
 	db.SetMaxIdleConns(1)

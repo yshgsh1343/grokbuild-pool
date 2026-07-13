@@ -5,6 +5,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
+	"net/url"
 	"math/rand"
 	"time"
 
@@ -32,10 +34,29 @@ type Lease struct {
 	Attempt     int
 }
 
-// String 脱敏密钥以便安全日志。
+// String 脱敏密钥与代理 userinfo，便于安全日志。
 func (l Lease) String() string {
 	return fmt.Sprintf("Lease{AccountID:%q Revision:%d ProxyMode:%q ProxyURL:%q StickyKey:%q Attempt:%d}",
-		l.AccountID, l.Revision, l.ProxyMode, l.ProxyURL, l.StickyKey, l.Attempt)
+		l.AccountID, l.Revision, l.ProxyMode, redactProxyURL(l.ProxyURL), l.StickyKey, l.Attempt)
+}
+
+// redactProxyURL 去掉代理 URL 中的 userinfo，仅保留 scheme/host/path 形态。
+func redactProxyURL(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return ""
+	}
+	u, err := url.Parse(raw)
+	if err != nil || u.Scheme == "" {
+		return "(invalid-proxy-url)"
+	}
+	if u.User != nil {
+		u.User = url.User("***")
+	}
+	// 不回传 query/fragment 中可能的密钥
+	u.RawQuery = ""
+	u.Fragment = ""
+	return u.String()
 }
 
 // Result 报告上游调用结果，供 Release 记账。

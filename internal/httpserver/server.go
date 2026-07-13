@@ -2,6 +2,8 @@ package httpserver
 
 import (
 	"encoding/json"
+	"strings"
+	"net"
 	"log/slog"
 	"net/http"
 	"time"
@@ -53,6 +55,10 @@ type Options struct {
 	Logger     *slog.Logger
 	Metrics    *Metrics
 	TokenStore *clients.Store // 可选：发放的客户端令牌库
+	// AdminKey 非空时非 loopback 访问 /metrics 需匹配；空则仅 loopback。
+	AdminKey string
+	// MetricsPublic true 时 /metrics 匿名公开（不推荐）。
+	MetricsPublic bool
 	// ExtraMount 在 /v1 之后挂载管理路由/静态资源（由 main 注入，避免循环依赖）
 	ExtraMount func(mux *http.ServeMux)
 	// OnMiddleware 在中间件构造后回调，便于热更新全局并发等。
@@ -102,7 +108,7 @@ func New(opts Options) http.Handler {
 		}
 		handleReadyz(w, r, opts.Hot, metrics)
 	})
-	mux.Handle("/metrics", metrics.Handler())
+	mux.Handle("/metrics", protectMetrics(metrics.Handler(), opts.AdminKey, opts.MetricsPublic))
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/" {
 			http.NotFound(w, r)
@@ -268,4 +274,40 @@ func stringsTrim(s string) string {
 		s = s[:len(s)-1]
 	}
 	return s
+}
+
+// protectMetrics 默认仅 loopback 或持有 admin_key 可访问 /metrics。
+func protectMetrics(next http.Handler, adminKey string, public bool) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if public {
+			next.ServeHTTP(w, r)
+			return
+		}
+		if isLoopbackRequest(r) {
+			next.ServeHTTP(w, r)
+			return
+		}
+		want := strings.TrimSpace(adminKey)
+		if want != "" {
+			got := extractAPIKey(r)
+			if got != "" && constantTimeEq(got, want) {
+				next.ServeHTTP(w, r)
+				return
+			}
+		}
+		http.Error(w, "metrics forbidden", http.StatusForbidden)
+	})
+}
+
+func isLoopbackRequest(r *http.Request) bool {
+	if r == nil {
+		return false
+	}
+	host, _, err := net.SplitHostPort(strings.TrimSpace(r.RemoteAddr))
+	if err != nil {
+		host = strings.TrimSpace(r.RemoteAddr)
+	}
+	host = strings.Trim(host, "[]")
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
 }

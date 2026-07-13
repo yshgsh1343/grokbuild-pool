@@ -126,7 +126,7 @@ func (m *Metrics) Inflight() int64 {
 	return m.inflight.Load()
 }
 
-// Handler 提供最小 Prometheus 文本暴露。
+// Handler provides minimal Prometheus text exposition.
 func (m *Metrics) Handler() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet && r.Method != http.MethodHead {
@@ -143,10 +143,12 @@ func (m *Metrics) Handler() http.Handler {
 			m = &Metrics{}
 		}
 		_, _ = fmt.Fprintf(w,
-			"# HELP process_resident_memory_bytes Resident memory size in bytes.\n"+
+			"# HELP process_sys_bytes Go runtime MemStats.Sys (not true RSS).\n"+
+				"# TYPE process_sys_bytes gauge\n"+
+				"process_sys_bytes %d\n"+
+				"# HELP process_resident_memory_bytes Deprecated alias of process_sys_bytes (not true RSS).\n"+
 				"# TYPE process_resident_memory_bytes gauge\n"+
 				"process_resident_memory_bytes %d\n"+
-				"# HELP process_start_time_seconds not tracked; placeholder 0\n"+
 				"# TYPE go_goroutines gauge\n"+
 				"go_goroutines %d\n"+
 				"# TYPE proxy_http_requests_total counter\n"+
@@ -176,6 +178,7 @@ func (m *Metrics) Handler() http.Handler {
 				"# TYPE pool_quarantine_count gauge\n"+
 				"pool_quarantine_count %d\n",
 			ms.Sys,
+			ms.Sys,
 			runtime.NumGoroutine(),
 			m.requests.Load(),
 			m.errors.Load(),
@@ -193,3 +196,4 @@ func (m *Metrics) Handler() http.Handler {
 		)
 	})
 }
+

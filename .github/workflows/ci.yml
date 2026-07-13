@@ -1,0 +1,23 @@
+name: ci
+on:
+  push:
+  pull_request:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: verify modules
+        run: go mod verify
+      - name: vet
+        run: go vet ./...
+      - name: test
+        run: go test ./...
+      - name: build
+        run: |
+          CGO_ENABLED=0 go build -trimpath -ldflags="-s -w -buildvcs=false" -o bin/pool-proxy ./cmd/pool-proxy
+          CGO_ENABLED=0 go build -trimpath -ldflags="-s -w -buildvcs=false" -o bin/poolctl ./cmd/poolctl
+          CGO_ENABLED=0 go build -trimpath -ldflags="-s -w -buildvcs=false" -o bin/render-config ./cmd/render-config

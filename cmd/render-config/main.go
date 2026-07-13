@@ -40,7 +40,8 @@ func main() {
 		os.Exit(1)
 	}
 	if generated != "" {
-		fmt.Fprintf(os.Stderr, "已生成 ADMIN_KEY（请立即保存）：%s\n", generated)
+		// Do not log the secret; only note that config was updated.
+		fmt.Fprintf(os.Stderr, "generated ADMIN_KEY written to config file (open config to save it; do not rely on container logs\n")
 	}
 	if err := os.WriteFile(path, []byte(text), 0o600); err != nil {
 		fmt.Fprintf(os.Stderr, "render-config: write: %v\n", err)

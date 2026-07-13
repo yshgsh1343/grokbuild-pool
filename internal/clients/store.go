@@ -1,6 +1,7 @@
 package clients
 
 import (
+	"os"
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
@@ -49,6 +50,7 @@ func Open(path string) (*Store, error) {
 	if err != nil {
 		return nil, fmt.Errorf("clients: open: %w", err)
 	}
+	_ = os.Chmod(path, 0o600)
 	db.SetMaxOpenConns(1)
 	db.SetMaxIdleConns(1)
 	db.SetConnMaxLifetime(0)
@@ -93,12 +95,13 @@ CREATE INDEX IF NOT EXISTS idx_tokens_enabled ON api_tokens(enabled);
 	if err != nil {
 		return err
 	}
-	// 旧库兼容：补 key_plain 列（管理台展开查看 / 批量复制）
-	_, _ = s.db.Exec(`ALTER TABLE api_tokens ADD COLUMN key_plain TEXT NOT NULL DEFAULT ''`)
-	return nil
-}
+	// 旧库兼容：保留 key_plain 列，但新写入恒为空；并清空历史明文。
+		_, _ = s.db.Exec(`ALTER TABLE api_tokens ADD COLUMN key_plain TEXT NOT NULL DEFAULT ''`)
+		_, _ = s.db.Exec(`UPDATE api_tokens SET key_plain='' WHERE key_plain != ''`)
+		return nil
+	}
 
-// Create 发放一把或多把令牌；明文仅在此返回。
+	// Create 发放一把或多把令牌；明文仅在此返回，不写入 key_plain。
 func (s *Store) Create(req CreateRequest) ([]CreateResult, error) {
 	if s == nil {
 		return nil, fmt.Errorf("clients: nil store")
@@ -142,8 +145,8 @@ func (s *Store) Create(req CreateRequest) ([]CreateResult, error) {
 		_, err = tx.Exec(`INSERT INTO api_tokens(
 id,name,key_prefix,key_hash,key_plain,enabled,remain_quota,unlimited_quota,max_concurrent,rpm,
 used_quota,request_count,expires_at,created_at,updated_at,last_used_at
-) VALUES(?,?,?,?,?,1,?,?,?,?,0,0,?,?,?,0)`,
-			t.ID, t.Name, t.KeyPrefix, t.KeyHash, plain, t.RemainQuota, boolInt(t.UnlimitedQuota),
+) VALUES(?,?,?,?,'',1,?,?,?,?,0,0,?,?,?,0)`,
+			t.ID, t.Name, t.KeyPrefix, t.KeyHash, t.RemainQuota, boolInt(t.UnlimitedQuota),
 			t.MaxConcurrent, t.RPM, t.ExpiresAt, t.CreatedAt, t.UpdatedAt)
 		if err != nil {
 			return nil, fmt.Errorf("clients: insert: %w", err)
@@ -156,12 +159,12 @@ used_quota,request_count,expires_at,created_at,updated_at,last_used_at
 	return out, nil
 }
 
-// List 按创建时间倒序列出（含 key_plain 供管理台展开/批量复制）。
+// List 按创建时间倒序列出（不含明文密钥；仅 key_prefix 可供识别）。
 func (s *Store) List(limit int) ([]Token, error) {
 	if limit <= 0 || limit > 500 {
 		limit = 100
 	}
-	rows, err := s.db.Query(`SELECT id,name,key_prefix,COALESCE(key_plain,''),enabled,remain_quota,unlimited_quota,max_concurrent,rpm,
+	rows, err := s.db.Query(`SELECT id,name,key_prefix,enabled,remain_quota,unlimited_quota,max_concurrent,rpm,
 used_quota,request_count,expires_at,created_at,updated_at,last_used_at
 FROM api_tokens ORDER BY created_at DESC LIMIT ?`, limit)
 	if err != nil {
@@ -172,17 +175,17 @@ FROM api_tokens ORDER BY created_at DESC LIMIT ?`, limit)
 	for rows.Next() {
 		var t Token
 		var en, unlim int
-		if err := rows.Scan(&t.ID, &t.Name, &t.KeyPrefix, &t.APIKey, &en, &t.RemainQuota, &unlim, &t.MaxConcurrent, &t.RPM,
+		if err := rows.Scan(&t.ID, &t.Name, &t.KeyPrefix, &en, &t.RemainQuota, &unlim, &t.MaxConcurrent, &t.RPM,
 			&t.UsedQuota, &t.RequestCount, &t.ExpiresAt, &t.CreatedAt, &t.UpdatedAt, &t.LastUsedAt); err != nil {
 			return nil, err
 		}
 		t.Enabled = en != 0
 		t.UnlimitedQuota = unlim != 0
+		t.APIKey = "" // 永不从库回读明文
 		out = append(out, t)
 	}
 	return out, rows.Err()
 }
-
 // Delete 按 id 删除令牌。
 func (s *Store) Delete(id string) error {
 	s.mu.Lock()

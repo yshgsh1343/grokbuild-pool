@@ -414,7 +414,8 @@ func (m *Middleware) Observe(next http.Handler) http.Handler {
 		}
 		elapsed := time.Since(start)
 		if metrics != nil {
-			if recorder.status >= 400 {
+			// 仅 5xx 计为 errors，避免 401/404/422 等客户端噪声拉低成功率
+			if recorder.status >= 500 {
 				metrics.errors.Add(1)
 			}
 			if recorder.bytes > 0 {

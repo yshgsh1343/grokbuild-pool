@@ -386,14 +386,14 @@ func (c *Config) applyDefaults() {
 	} else if !c.Anthropic.Enabled && len(c.Anthropic.ModelAliases) == 0 {
 		// 显式全空则保持禁用；否则在默认启用标志缺失时填充默认
 	}
-	// Anthropic.Enabled 默认 true，除非 YAML 显式 false（bool 零值为 false）。
-	// 需要默认启用时请谨慎与 Default() 合并。
-	// 当别名像默认集或 Enabled 未出现时重新启用——
-	// 简化：ModelAliases 非空或 CountTokens/Strip 有值则保留；全零则用 Default。
-	if !c.Anthropic.Enabled && len(c.Anthropic.ModelAliases) == 0 &&
-		!c.Anthropic.StripUnknownBetas && !c.Anthropic.CountTokens &&
-		len(c.Anthropic.PassthroughPrefixes) == 0 {
-		c.Anthropic = d.Anthropic
+	// 不再在 applyDefaults 里把 Anthropic 整段重置为 Default()：
+	// 旧逻辑会在 `anthropic.enabled: false` 且未写 aliases 时把 Enabled 打回 true。
+	// Load 以 Default() 为底再 Decode，省略 anthropic 段时仍保持默认启用。
+	if c.Anthropic.ModelAliases == nil {
+		c.Anthropic.ModelAliases = d.Anthropic.ModelAliases
+	}
+	if c.Anthropic.PassthroughPrefixes == nil {
+		c.Anthropic.PassthroughPrefixes = append([]string(nil), d.Anthropic.PassthroughPrefixes...)
 	}
 	if c.Upstream.ClientVersion == "" {
 		c.Upstream.ClientVersion = d.Upstream.ClientVersion
@@ -544,7 +544,7 @@ func (c Config) UseMockUpstream() bool {
 //  4. 默认 data_dir/pool.db（首次启动自动创建空库）
 func (c Config) ResolveDBPath() (string, error) {
 	if p := strings.TrimSpace(c.DBPath); p != "" {
-		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+		if err := os.MkdirAll(filepath.Dir(p), 0o700); err != nil {
 			return "", fmt.Errorf("config: mkdir for db_path %s: %w", p, err)
 		}
 		return p, nil
@@ -553,7 +553,7 @@ func (c Config) ResolveDBPath() (string, error) {
 	if dir == "" {
 		dir = DefaultDataDir
 	}
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return "", fmt.Errorf("config: mkdir data_dir %s: %w", dir, err)
 	}
 	candidates := []string{

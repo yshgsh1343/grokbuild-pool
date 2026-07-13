@@ -128,7 +128,7 @@ func (s *Service) Start(parent context.Context) error {
 	return nil
 }
 
-// Stop 取消 worker 并等待退出。
+// Stop 取消 worker 并等待退出（最多 15s，避免滚动发布挂死）。
 func (s *Service) Stop() {
 	if s == nil {
 		return
@@ -144,7 +144,16 @@ func (s *Service) Stop() {
 	if cancel != nil {
 		cancel()
 	}
-	s.wg.Wait()
+	done := make(chan struct{})
+	go func() {
+		s.wg.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(15 * time.Second):
+		// 超时放弃等待；worker 可能仍在 OAuth 网络调用上，进程退出后由 OS 回收
+	}
 }
 
 func (s *Service) workerLoop(ctx context.Context) {

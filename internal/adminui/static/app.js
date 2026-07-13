@@ -849,7 +849,7 @@
     var defR = d.token_default_rpm != null ? d.token_default_rpm : 0;
     var defU = d.token_default_unlimited ? "1" : "0";
     $("main").innerHTML = wrapPage(
-      pageHd("令牌", "new-api 风格 · 可展开查看密钥 · 支持批量复制", "") +
+      pageHd("令牌", "new-api 风格 · 明文仅在创建时显示一次 · 支持批量操作", "") +
       '<div class="panel token-create-panel"><div class="panel-title">快速创建</div>' +
       '<div class="form-row form-row-token">' +
       '<div class="field"><label for="tName">名称</label><input id="tName" class="input" value="client" /></div>' +
@@ -1011,7 +1011,7 @@
           ? '<div class="tok-detail mono">' + esc(key) +
             ' <button type="button" class="btn btn-sm btn-secondary" data-act="copy" data-key="' +
             esc(key) + '">复制</button></div>'
-          : '<div class="tok-detail muted">旧令牌未存盘明文（重新创建后可展开查看）</div>';
+          : '<div class="tok-detail muted">密钥明文仅在创建时返回一次；列表不再回读明文。</div>';
         return '<tr class="tok-row" data-id="' + esc(t.id) + '">' +
           '<td><input type="checkbox" class="tok-check" data-id="' + esc(t.id) +
             '" data-key="' + esc(key) + '" /></td>' +

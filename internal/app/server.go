@@ -66,6 +66,7 @@ func serveHTTP(cfg config.Config, pool *poolStack, up *upstreamStack, adm *admin
 		Logger:     logger,
 		Metrics:    metrics,
 		TokenStore: adm.Tokens,
+		AdminKey:   cfg.AdminKey,
 		StartedAt:  adm.StartedAt,
 		ExtraMount: func(mux *http.ServeMux) {
 			adm.Handlers.Mount(mux)

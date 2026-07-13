@@ -18,7 +18,7 @@ db_path: ""
 api_key: ""
 
 # 管理台密钥。公网监听时必须设置强随机值，禁止使用占位符
-admin_key: "change-me"
+admin_key: "local-dev-admin-key-not-for-prod"
 
 # 热池目标容量
 hot_size: 3000

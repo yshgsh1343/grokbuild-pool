@@ -484,6 +484,13 @@ func (c *SettingsController) Apply(in RuntimeSettings) (RuntimeSettings, error) 
 	if in.UpstreamBaseURL != pi.UpstreamBaseURL {
 		restart = append(restart, "upstream_base_url")
 	}
+	// hot_size / refresh_workers 持久化但运行时无法完整热更（索引容量与 worker 数在启动时固定）
+	if in.HotSize != prev.HotSize {
+		restart = append(restart, "hot_size")
+	}
+	if in.RefreshWorkers != prev.RefreshWorkers {
+		restart = append(restart, "refresh_workers")
+	}
 	if len(restart) > 0 {
 		in.RestartHint = "以下字段已保存，需重启进程后完全生效: " + strings.Join(restart, ", ")
 	} else {
