@@ -34,13 +34,19 @@
       el.setAttribute("role", "status");
       host.appendChild(el);
     }
-    el.textContent = msg == null ? "" : String(msg);
-    el.classList.remove("hidden", "ok", "bad");
-    el.classList.add(ok ? "ok" : "bad");
     if (toastTimer) clearTimeout(toastTimer);
+    el.textContent = msg == null ? "" : String(msg);
+    el.classList.remove("hidden", "ok", "bad", "is-leaving");
+    // restart enter animation even for identical messages
+    void el.offsetWidth;
+    el.classList.add(ok ? "ok" : "bad");
     toastTimer = setTimeout(function () {
-      el.classList.add("hidden");
-    }, 3200);
+      el.classList.add("is-leaving");
+      setTimeout(function () {
+        el.classList.add("hidden");
+        el.classList.remove("is-leaving");
+      }, 180);
+    }, 3000);
   }
 
   function themeInit() {
