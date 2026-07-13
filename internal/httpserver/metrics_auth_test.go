@@ -2,7 +2,8 @@ package httpserver
 
 import (
 	"net/http"
-	"net/http/httptest	"testing"
+	"net/http/httptest"
+	"testing"
 )
 
 func TestProtectMetricsLoopbackAndAdmin(t *testing.T) {
