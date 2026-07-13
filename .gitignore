@@ -30,3 +30,4 @@ mem.out
 # local agent state
 .claude/
 __pycache__/
+/pool-proxy

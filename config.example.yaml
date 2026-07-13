@@ -66,15 +66,12 @@ lease:
 
 anthropic:
   enabled: true
+  # /v1/models 只暴露精简列表；请求仍兼容更多 claude-* 版号（见 ResolveModel）
   model_aliases:
     claude-sonnet-4: grok-4.5
-    claude-sonnet-4-0: grok-4.5
     claude-sonnet-4-6: grok-4.5
-    claude-sonnet-5: grok-4.5
     claude-opus-4: grok-4.5
     claude-opus-4-6: grok-4.5
-    claude-opus-4-7: grok-4.5
-    claude-opus-4-8: grok-4.5
     claude-haiku-4: grok-composer-2.5-fast
     claude-haiku-4-5: grok-composer-2.5-fast
     sonnet: grok-4.5
@@ -86,9 +83,9 @@ anthropic:
 
 imports:
   enabled: true
-  # 上传体积放宽；实际闸门以 max_entries（默认 1 万条）为主
-  max_upload_bytes: 268435456
-  max_request_bytes: 269484032
+  # 主闸门：max_entries（默认 1 万条）。max_upload_bytes/max_request_bytes = 0 表示不限体积
+  max_upload_bytes: 0
+  max_request_bytes: 0
   max_entries: 10000
   max_ndjson_line_bytes: 1048576
   max_sso_value_bytes: 16384

@@ -396,7 +396,8 @@ func (c *SettingsController) Apply(in RuntimeSettings) (RuntimeSettings, error) 
 	if in.OAuthClientID == "" {
 		in.OAuthClientID = prev.OAuthClientID
 	}
-	if in.ImportMaxUploadBytes <= 0 {
+	// 负数=未传/保持；0=不限体积；正数=字节上限
+	if in.ImportMaxUploadBytes < 0 {
 		in.ImportMaxUploadBytes = prev.ImportMaxUploadBytes
 	}
 	if in.ImportMaxEntries <= 0 {
@@ -447,9 +448,12 @@ func (c *SettingsController) Apply(in RuntimeSettings) (RuntimeSettings, error) 
 	in.AdminKey = ""
 	in.ImportSSOAPIKey = ""
 
-	// 导入数值边界
-	if in.ImportMaxUploadBytes > 256<<20 {
-		in.ImportMaxUploadBytes = 256 << 20
+	// 导入数值边界：0=不限体积；>0 时硬顶 2GiB
+	if in.ImportMaxUploadBytes < 0 {
+		in.ImportMaxUploadBytes = 0
+	}
+	if in.ImportMaxUploadBytes > 2<<30 {
+		in.ImportMaxUploadBytes = 2 << 30
 	}
 	if in.ImportMaxEntries > 100_000 {
 		in.ImportMaxEntries = 100_000

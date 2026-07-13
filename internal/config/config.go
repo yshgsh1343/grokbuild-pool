@@ -32,16 +32,19 @@ const (
 	// DefaultMaxAttempts 为 lease 失败切换预算。
 	DefaultMaxAttempts = 6
 	// Admin 浏览器导入默认资源限制。
-	// 上传体积放宽到 256 MiB，实际以 max_entries=10000 条为主要闸门。
-	DefaultImportMaxUploadBytes     = 256 << 20
+	// 主闸门是 max_entries（默认 1 万条）；max_upload_bytes=0 表示不限体积。
+	// 若显式配置体积上限，则 1 MiB … MaxImportUploadBytes 之间。
+	DefaultImportMaxUploadBytes     = 0 // 0 = 不限体积，只按条数限
 	DefaultImportRequestOverhead    = 1 << 20
-	DefaultImportMaxRequestBytes    = DefaultImportMaxUploadBytes + DefaultImportRequestOverhead
+	DefaultImportMaxRequestBytes    = 0 // 0 = 随上传不限；显式上限时需 ≥ upload+overhead
 	DefaultImportMaxEntries         = 10_000
 	DefaultImportMaxNDJSONLineBytes = 1 << 20
 	DefaultImportMaxSSOValueBytes   = 16 << 10
 	DefaultImportMaxConcurrentJobs  = 2
 	DefaultImportJobTimeoutSec      = 2 * 60 * 60
 	DefaultImportStagingStaleSec    = 24 * 60 * 60
+	// MaxImportUploadBytes 为显式体积上限的硬顶（2 GiB）；0 仍表示不限。
+	MaxImportUploadBytes = 2 << 30
 )
 
 // Config 为 pool-proxy 的根运行时配置。
@@ -137,10 +140,11 @@ type LimitsConfig struct {
 }
 
 // ImportsConfig 控制 Admin 浏览器上传和异步导入限制。
+// 主闸门是 MaxEntries；MaxUploadBytes/MaxRequestBytes 为 0 时不限体积。
 type ImportsConfig struct {
 	Enabled              bool               `yaml:"enabled"`
-	MaxUploadBytes       int64              `yaml:"max_upload_bytes"`
-	MaxRequestBytes      int64              `yaml:"max_request_bytes"`
+	MaxUploadBytes       int64              `yaml:"max_upload_bytes"`  // 0 = 不限
+	MaxRequestBytes      int64              `yaml:"max_request_bytes"` // 0 = 不限
 	MaxEntries           int                `yaml:"max_entries"`
 	MaxNDJSONLineBytes   int                `yaml:"max_ndjson_line_bytes"`
 	MaxSSOValueBytes     int                `yaml:"max_sso_value_bytes"`
@@ -348,10 +352,12 @@ func (c *Config) applyDefaults() {
 	if c.Limits.MaxConcurrent <= 0 {
 		c.Limits.MaxConcurrent = d.Limits.MaxConcurrent
 	}
-	if c.Imports.MaxUploadBytes <= 0 {
+	// MaxUploadBytes / MaxRequestBytes：0 表示不限体积，不回填默认正数。
+	// 仅负值视为未配置并回退默认（默认亦为 0）。
+	if c.Imports.MaxUploadBytes < 0 {
 		c.Imports.MaxUploadBytes = d.Imports.MaxUploadBytes
 	}
-	if c.Imports.MaxRequestBytes <= 0 {
+	if c.Imports.MaxRequestBytes < 0 {
 		c.Imports.MaxRequestBytes = d.Imports.MaxRequestBytes
 	}
 	if c.Imports.MaxEntries <= 0 {
@@ -430,11 +436,19 @@ func (c Config) Validate() error {
 	if c.HotSize > 200_000 {
 		return fmt.Errorf("config: hot_size %d too large", c.HotSize)
 	}
-	if c.Imports.MaxUploadBytes < 1<<20 || c.Imports.MaxUploadBytes > 256<<20 {
-		return fmt.Errorf("config: imports.max_upload_bytes must be between 1 MiB and 256 MiB")
+	// 0 = 不限体积（只按 max_entries）；>0 时 1 MiB … MaxImportUploadBytes。
+	if c.Imports.MaxUploadBytes < 0 || c.Imports.MaxUploadBytes > MaxImportUploadBytes {
+		return fmt.Errorf("config: imports.max_upload_bytes must be 0 (unlimited) or between 1 and %d", MaxImportUploadBytes)
 	}
-	if c.Imports.MaxRequestBytes < c.Imports.MaxUploadBytes+DefaultImportRequestOverhead || c.Imports.MaxRequestBytes > 260<<20 {
-		return fmt.Errorf("config: imports.max_request_bytes must exceed max_upload_bytes by at least 1 MiB")
+	if c.Imports.MaxUploadBytes > 0 && c.Imports.MaxUploadBytes < 1<<20 {
+		return fmt.Errorf("config: imports.max_upload_bytes must be 0 (unlimited) or at least 1 MiB")
+	}
+	if c.Imports.MaxRequestBytes < 0 || c.Imports.MaxRequestBytes > MaxImportUploadBytes+DefaultImportRequestOverhead {
+		return fmt.Errorf("config: imports.max_request_bytes must be 0 (unlimited) or <= %d", MaxImportUploadBytes+DefaultImportRequestOverhead)
+	}
+	if c.Imports.MaxUploadBytes > 0 && c.Imports.MaxRequestBytes > 0 &&
+		c.Imports.MaxRequestBytes < c.Imports.MaxUploadBytes+DefaultImportRequestOverhead {
+		return fmt.Errorf("config: imports.max_request_bytes must exceed max_upload_bytes by at least 1 MiB when both are set")
 	}
 	if c.Imports.MaxEntries < 1 || c.Imports.MaxEntries > 100_000 {
 		return fmt.Errorf("config: imports.max_entries must be between 1 and 100000")

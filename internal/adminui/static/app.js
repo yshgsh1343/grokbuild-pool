@@ -690,7 +690,7 @@
         );
         html += section("import", "导入 / SSO 转换", "限制热更；填 SSO endpoint+key 可热重建转换器",
           fieldBool("启用导入", "sImpEn", !!s.import_enabled) +
-          field("最大上传字节", "sImpUp", s.import_max_upload_bytes) +
+          field("最大上传字节(0=不限)", "sImpUp", s.import_max_upload_bytes) +
           field("最大条目(默认1万)", "sImpEnt", s.import_max_entries) +
           field("并发任务数", "sImpJobs", s.import_max_concurrent_jobs) +
           field("解析 workers", "sImpW", s.import_workers) +
@@ -1465,13 +1465,13 @@
       '<select id="impFormat" class="input"><option value="sso" selected>SSO</option><option value="json">JSON</option><option value="ndjson">NDJSON</option></select></div>' +
       '<div><label for="impFile">本地文件</label>' +
       '<input id="impFile" class="input file-input" type="file" accept=".txt,.json,text/plain,application/json" /></div></div>' +
-      '<p class="muted panel-note import-limit-note" id="impLimits">默认 SSO · 最多 10000 条 · 正在读取服务端限制…</p>' +
+      '<p class="muted panel-note import-limit-note" id="impLimits">默认 SSO→JSON · 最多 10000 条 · 正在读取服务端限制…</p>' +
       '<div class="toolbar form-actions">' +
       '<button type="button" class="btn btn-primary" id="impSubmit">上传并创建任务</button></div></div>' +
       '<div class="section-head"><div class="section-title">任务列表</div></div>' +
       '<div id="impTable"><div class="empty">加载中…</div></div>'
     );
-    var importMaxUpload = 256 * 1024 * 1024;
+    var importMaxUpload = 0; // 0=不限，以条数为主
     var importMaxEntries = 10000;
 
     function setImportError(message) {
@@ -1496,13 +1496,19 @@
         var list = (res && res.jobs) || [];
         var limits = (res && res.limits) || {};
         var note = $("impLimits");
-        if (limits.max_upload_bytes) importMaxUpload = Number(limits.max_upload_bytes) || importMaxUpload;
+        if (limits.max_upload_bytes != null && limits.max_upload_bytes !== "") {
+          var up = Number(limits.max_upload_bytes);
+          if (!isNaN(up) && up >= 0) importMaxUpload = up;
+        }
         if (limits.max_entries) importMaxEntries = Number(limits.max_entries) || importMaxEntries;
         if (note) {
-          // 以条数为主闸门；体积上限仅作兜底提示
-          note.textContent = "默认 SSO · 最多 " + importMaxEntries +
-            " 条 · 体积兜底 " + Math.round(importMaxUpload / 1048576) + " MiB · 转换器" +
-            (limits.sso_converter_configured ? "已配置" : "未配置（SSO 需配置后可用）");
+          // 以条数为主闸门；max_upload_bytes=0 表示不限体积
+          var sizeHint = (!importMaxUpload || importMaxUpload <= 0)
+            ? "不限体积"
+            : ("体积兜底 " + Math.round(importMaxUpload / 1048576) + " MiB");
+          note.textContent = "默认 SSO→JSON · 最多 " + importMaxEntries +
+            " 条 · " + sizeHint + " · 转换器" +
+            (limits.sso_converter_configured ? "已就绪（内置 Go Device Flow 或远程）" : "未就绪");
         }
         var host = $("impTable");
         if (!host) return;
@@ -1548,7 +1554,7 @@
         setImportError("请选择要上传的本地文件");
         return;
       }
-      if (file.size > importMaxUpload) {
+      if (importMaxUpload > 0 && file.size > importMaxUpload) {
         setImportError("文件超过 " + Math.round(importMaxUpload / 1048576) + " MiB；服务端也会再次校验");
         return;
       }

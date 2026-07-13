@@ -7,7 +7,6 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/yshgsh1343/grokbuild2api/internal/config"
 	"github.com/yshgsh1343/grokbuild2api/internal/importjobs"
 )
 
@@ -24,9 +23,9 @@ func (h *Handlers) ListImportJobs(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"jobs": list,
 		"limits": map[string]any{
-			"max_upload_bytes":         h.Config.Imports.MaxUploadBytes,
-			"max_entries":              h.Config.Imports.MaxEntries,
-			"sso_converter_configured": strings.TrimSpace(h.Config.Imports.SSOConverter.Endpoint) != "" && strings.TrimSpace(h.Config.Imports.SSOConverter.APIKey) != "",
+			"max_upload_bytes":         h.effectiveImportMaxUploadBytes(),
+			"max_entries":              h.effectiveImportMaxEntries(),
+			"sso_converter_configured": h.ssoConverterConfigured(),
 		},
 	})
 }
@@ -34,7 +33,7 @@ func (h *Handlers) ListImportJobs(w http.ResponseWriter, r *http.Request) {
 // CreateImportJob POST /admin/import/jobs。
 // 浏览器使用 multipart(format,file)；旧 JSON path 协议仅在配置显式开启时接受。
 func (h *Handlers) CreateImportJob(w http.ResponseWriter, r *http.Request) {
-	if h.ImportJobs == nil || !h.Config.Imports.Enabled {
+	if h.ImportJobs == nil || !h.importEnabled() {
 		writeErr(w, http.StatusServiceUnavailable, "导入任务未启用")
 		return
 	}
@@ -47,7 +46,7 @@ func (h *Handlers) CreateImportJob(w http.ResponseWriter, r *http.Request) {
 	case "multipart/form-data":
 		h.createUploadImportJob(w, r)
 	case "application/json":
-		if !h.Config.Imports.AllowServerPath {
+		if !h.importAllowServerPath() {
 			writeErr(w, http.StatusUnsupportedMediaType, "服务端路径导入未启用")
 			return
 		}
@@ -74,11 +73,11 @@ func (h *Handlers) createUploadImportJob(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	defer permit.Release()
-	maxRequest := h.Config.Imports.MaxRequestBytes
-	if maxRequest <= 0 {
-		maxRequest = config.DefaultImportMaxRequestBytes
+	// max_request_bytes / max_upload_bytes 为 0 时不限体积，只靠 max_entries。
+	maxRequest := h.effectiveImportMaxRequestBytes()
+	if maxRequest > 0 {
+		r.Body = http.MaxBytesReader(w, r.Body, maxRequest)
 	}
-	r.Body = http.MaxBytesReader(w, r.Body, maxRequest)
 	reader, err := r.MultipartReader()
 	if err != nil {
 		writeErr(w, http.StatusBadRequest, "multipart 请求无效")
@@ -143,7 +142,7 @@ func (h *Handlers) createUploadImportJob(w http.ResponseWriter, r *http.Request)
 				return
 			}
 			fileSeen = true
-			upload, err = h.ImportJobs.StageReservedUpload(part, part.FileName(), h.Config.Imports.MaxUploadBytes, permit)
+			upload, err = h.ImportJobs.StageReservedUpload(part, part.FileName(), h.effectiveImportMaxUploadBytes(), permit)
 			_ = part.Close()
 			if err != nil {
 				var maxErr *http.MaxBytesError
@@ -217,4 +216,86 @@ func (h *Handlers) GetImportJob(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, job)
+}
+
+
+// importEnabled 优先 settings 热配置，回退 yaml Config。
+func (h *Handlers) importEnabled() bool {
+	if h != nil && h.Settings != nil {
+		return h.Settings.Snapshot().ImportEnabled
+	}
+	if h == nil {
+		return false
+	}
+	return h.Config.Imports.Enabled
+}
+
+func (h *Handlers) importAllowServerPath() bool {
+	if h != nil && h.Settings != nil {
+		return h.Settings.Snapshot().ImportAllowServerPath
+	}
+	if h == nil {
+		return false
+	}
+	return h.Config.Imports.AllowServerPath
+}
+
+// effectiveImportMaxUploadBytes：0 = 不限体积（主闸门为 max_entries）。
+func (h *Handlers) effectiveImportMaxUploadBytes() int64 {
+	if h != nil && h.Settings != nil {
+		return h.Settings.Snapshot().ImportMaxUploadBytes
+	}
+	if h == nil {
+		return 0
+	}
+	return h.Config.Imports.MaxUploadBytes
+}
+
+func (h *Handlers) effectiveImportMaxEntries() int {
+	if h != nil && h.Settings != nil {
+		n := h.Settings.Snapshot().ImportMaxEntries
+		if n > 0 {
+			return n
+		}
+	}
+	if h == nil {
+		return 0
+	}
+	return h.Config.Imports.MaxEntries
+}
+
+// effectiveImportMaxRequestBytes：0 = 不限；若仅配置了 upload 上限则自动 +1MiB 开销。
+func (h *Handlers) effectiveImportMaxRequestBytes() int64 {
+	if h == nil {
+		return 0
+	}
+	req := h.Config.Imports.MaxRequestBytes
+	up := h.effectiveImportMaxUploadBytes()
+	// settings 目前不单独热更 max_request_bytes；upload=0 时请求也不限。
+	if up <= 0 {
+		return 0
+	}
+	if req > 0 {
+		return req
+	}
+	return up + (1 << 20)
+}
+
+func (h *Handlers) ssoConverterConfigured() bool {
+	// 内置 Go Device Flow 默认可用；远程 endpoint 仅作可选覆盖。
+	if h != nil && h.ImportJobs != nil {
+		return true
+	}
+	if h != nil && h.Settings != nil {
+		s := h.Settings.Snapshot()
+		if strings.TrimSpace(s.ImportSSOEndpoint) != "" && s.ImportSSOAPIKeySet {
+			return true
+		}
+	}
+	if h == nil {
+		return false
+	}
+	ep := strings.TrimSpace(h.Config.Imports.SSOConverter.Endpoint)
+	key := strings.TrimSpace(h.Config.Imports.SSOConverter.APIKey)
+	return ep != "" && key != ""
 }

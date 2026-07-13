@@ -71,7 +71,7 @@ type Options struct {
 	JobTimeout         time.Duration
 	StagingStaleAfter  time.Duration
 	AllowServerPath    bool
-	Converter          *ssoimport.Client
+	Converter          ssoimport.Converter
 	AfterImport        func() error
 }
 
@@ -402,17 +402,20 @@ func (m *Manager) StageReservedUpload(r io.Reader, sourceName string, maxBytes i
 			_ = os.Remove(ready)
 		}
 	}()
+	// maxBytes <= 0：不限体积，只按 max_entries 做业务闸门。
+	var written int64
 	if maxBytes <= 0 {
-		maxBytes = 32 << 20
+		written, err = io.Copy(f, r)
+	} else {
+		written, err = io.Copy(f, io.LimitReader(r, maxBytes+1))
 	}
-	written, err := io.Copy(f, io.LimitReader(r, maxBytes+1))
 	if err != nil {
 		return StagedUpload{}, fmt.Errorf("importjobs: write staged upload: %w", err)
 	}
 	if written == 0 {
 		return StagedUpload{}, ErrEmptyUpload
 	}
-	if written > maxBytes {
+	if maxBytes > 0 && written > maxBytes {
 		return StagedUpload{}, ErrUploadTooLarge
 	}
 	if err := f.Close(); err != nil {

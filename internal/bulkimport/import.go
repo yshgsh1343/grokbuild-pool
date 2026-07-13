@@ -50,7 +50,7 @@ type Config struct {
 	// ProgressEvery 每 N 个成功账号打进度日志（0 = 包常量 ProgressEvery）。
 	ProgressEvery int
 	// Converter 可选 SSO 转换器（SSO 格式必需）。
-	Converter *ssoimport.Client
+	Converter ssoimport.Converter
 	// MaxEntries 限制单次导入条目数；<=0 保持兼容无界行为。
 	MaxEntries int
 	// MaxNDJSONLineBytes 限制 NDJSON 单行；<=0 使用 1 MiB。

@@ -55,10 +55,19 @@ type ConvertedCredential struct {
 	Error        string
 }
 
+// Converter 将 SSO cookie/token 转为 Grok 凭证（HTTP sidecar 或内置 Device Flow）。
+type Converter interface {
+	Convert(ctx context.Context, ssoValues []string) ([]ConvertedCredential, error)
+}
+
 // Client 调用 SSO→Grok 转换 HTTP 服务。
+
 type Client struct {
 	cfg Config
 }
+
+var _ Converter = (*Client)(nil)
+
 
 // NewClient 校验配置并返回转换客户端。
 func NewClient(cfg Config) (*Client, error) {

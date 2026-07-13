@@ -497,11 +497,11 @@ func (h *Handlers) SafeConfig(w http.ResponseWriter, r *http.Request) {
 		"admin_key_set":  strings.TrimSpace(h.Config.AdminKey) != "",
 		"version":        h.Version,
 		"imports": map[string]any{
-			"enabled":                  h.Config.Imports.Enabled,
-			"max_upload_bytes":         h.Config.Imports.MaxUploadBytes,
-			"max_entries":              h.Config.Imports.MaxEntries,
-			"allow_server_path":        h.Config.Imports.AllowServerPath,
-			"sso_converter_configured": strings.TrimSpace(h.Config.Imports.SSOConverter.Endpoint) != "" && strings.TrimSpace(h.Config.Imports.SSOConverter.APIKey) != "",
+			"enabled":                  h.importEnabled(),
+			"max_upload_bytes":         h.effectiveImportMaxUploadBytes(),
+			"max_entries":              h.effectiveImportMaxEntries(),
+			"allow_server_path":        h.importAllowServerPath(),
+			"sso_converter_configured": h.ssoConverterConfigured(),
 		},
 		"note": "可热更新参数见 GET/PUT /admin/settings",
 	}

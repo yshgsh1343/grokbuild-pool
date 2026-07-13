@@ -24,15 +24,13 @@ func Default() Config {
 	return Config{
 		Anthropic: AnthropicConfig{
 			Enabled: true,
+			// 精简可发现别名：列表更短；请求侧仍支持这些 id，且 passthrough grok-*。
+			// 旧版号（如 claude-opus-4-8）不在列表中，但可通过请求透传/兼容解析（见 ResolveModel 注释）。
 			ModelAliases: map[string]string{
 				"claude-sonnet-4":   "grok-4.5",
-				"claude-sonnet-4-0": "grok-4.5",
 				"claude-sonnet-4-6": "grok-4.5",
-				"claude-sonnet-5":   "grok-4.5",
 				"claude-opus-4":     "grok-4.5",
 				"claude-opus-4-6":   "grok-4.5",
-				"claude-opus-4-7":   "grok-4.5",
-				"claude-opus-4-8":   "grok-4.5",
 				"claude-haiku-4":    "grok-composer-2.5-fast",
 				"claude-haiku-4-5":  "grok-composer-2.5-fast",
 				"sonnet":            "grok-4.5",
@@ -46,7 +44,9 @@ func Default() Config {
 	}
 }
 
-// ResolveModel maps an Anthropic model id using explicit aliases only.
+// ResolveModel maps an Anthropic model id using explicit aliases, then a small
+// compatibility fallback for common Claude Code versioned ids that we intentionally
+// omit from the public model list (to keep /v1/models short).
 func (c AnthropicConfig) ResolveModel(model string) string {
 	model = strings.TrimSpace(model)
 	if model == "" {
@@ -59,6 +59,17 @@ func (c AnthropicConfig) ResolveModel(model string) string {
 	}
 	if alias, ok := c.ModelAliases[model]; ok && alias != "" {
 		return alias
+	}
+	// 请求兼容：旧/细分版号不出现在 /v1/models，但仍可调用。
+	switch {
+	case strings.HasPrefix(model, "claude-haiku-"):
+		return "grok-composer-2.5-fast"
+	case strings.HasPrefix(model, "claude-sonnet-"), strings.HasPrefix(model, "claude-opus-"):
+		return "grok-4.5"
+	case model == "sonnet" || model == "opus":
+		return "grok-4.5"
+	case model == "haiku":
+		return "grok-composer-2.5-fast"
 	}
 	return model
 }

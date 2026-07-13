@@ -138,7 +138,7 @@ func wireAdmin(cfg config.Config, pool *poolStack, up *upstreamStack, metrics *h
 	var importJobs *importjobs.Manager
 	// 始终初始化导入管理器，便于前端热开/热改；enabled=false 时仍可看配置
 	{
-		var ssoConverter *ssoimport.Client
+		var ssoConverter ssoimport.Converter
 		converterCfg := cfg.Imports.SSOConverter
 		if strings.TrimSpace(converterCfg.Endpoint) != "" && strings.TrimSpace(converterCfg.APIKey) != "" {
 			client, err := ssoimport.NewClient(ssoimport.Config{
@@ -151,9 +151,17 @@ func wireAdmin(cfg config.Config, pool *poolStack, up *upstreamStack, metrics *h
 			})
 			if err != nil {
 				logger.Warn("sso_converter_config_invalid", "error", err)
+				// 回退内置 Go Device Flow
+				ssoConverter = ssoimport.NewLocalConverter()
+				logger.Info("sso_converter_local", "mode", "builtin-device-flow")
 			} else {
 				ssoConverter = client
+				logger.Info("sso_converter_remote", "endpoint", converterCfg.Endpoint)
 			}
+		} else {
+			// 默认：内置纯 Go SSO→JSON（Device Flow），无需 Python sidecar
+			ssoConverter = ssoimport.NewLocalConverter()
+			logger.Info("sso_converter_local", "mode", "builtin-device-flow")
 		}
 		importJobs, err = importjobs.NewWithOptions(cfg.DataDir, pool.Catalog, importjobs.Options{
 			MaxConcurrentJobs:  cfg.Imports.MaxConcurrentJobs,
@@ -188,7 +196,7 @@ func wireAdmin(cfg config.Config, pool *poolStack, up *upstreamStack, metrics *h
 		if key == "" {
 			key = ssoKeyHold
 		}
-		var conv *ssoimport.Client
+		var conv ssoimport.Converter
 		if strings.TrimSpace(in.ImportSSOEndpoint) != "" && key != "" {
 			client, err := ssoimport.NewClient(ssoimport.Config{
 				Endpoint:      in.ImportSSOEndpoint,
@@ -203,6 +211,9 @@ func wireAdmin(cfg config.Config, pool *poolStack, up *upstreamStack, metrics *h
 			}
 			conv = client
 			ssoKeyHold = key
+		} else {
+			// 未配置远程转换器时始终使用内置 Go Device Flow
+			conv = ssoimport.NewLocalConverter()
 		}
 		importJobs.ApplyOptions(importjobs.Options{
 			MaxConcurrentJobs:  in.ImportMaxConcurrentJobs,
