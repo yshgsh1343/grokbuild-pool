@@ -64,7 +64,7 @@ cd grokbuild-pool
 
 ```bash
 export ADMIN_KEY="$(openssl rand -hex 24)"
-docker compose up -d --build
+docker compose -f docker-compose.sqlite.yml up -d --build
 ```
 
 ### 3. 导入账号
@@ -77,10 +77,10 @@ docker compose up -d --build
 
 项目现在有两条路径，**默认请先用方式 A**。
 
-| 方式 | 组件 | 存储 | 适合规模 | 状态 |
-| --- | --- | --- | --- | --- |
-| **A. 单机 SQLite** | 仅 `pool-proxy` | SQLite + 进程内热池/粘性 | 中小规模，先跑通 | **默认可用** |
-| **B. Postgres + Redis** | `gateway` + `worker` + `controlplane` + `refresher` | Postgres 冷库 + Redis 跨进程状态 | 目标 10 万级账号池 | **代码骨架已合入 main，尚未完成联调/压测验证** |
+| 方式 | Compose 文件 | 组件 | 存储 | 适合规模 | 状态 |
+| --- | --- | --- | --- | --- | --- |
+| **A. 单机 SQLite** | `docker-compose.sqlite.yml` | 仅 `pool-proxy` | SQLite + 进程内热池/粘性 | 中小规模，先跑通 | **默认可用** |
+| **B. Postgres + Redis** | `docker-compose.postgres-redis.yml` | `gateway` + `worker` + `controlplane` + `refresher` | Postgres 冷库 + Redis 跨进程状态 | 目标 10 万级账号池 | **代码骨架已合入 main，尚未完成联调/压测验证** |
 
 > **重要备注**  
 > - 方式 B（Postgres + Redis 多进程）目前只完成接口、DDL、进程入口和协议挂载骨架。  
@@ -92,9 +92,9 @@ docker compose up -d --build
 就是上面的「快速开始」：一个 `pool-proxy` 进程 + `data/pool.db`。
 
 ```bash
-# Docker
+# Docker（单机 SQLite）
 export ADMIN_KEY="$(openssl rand -hex 24)"
-docker compose up -d --build
+docker compose -f docker-compose.sqlite.yml up -d --build
 
 # 或本地二进制
 # make build
@@ -124,7 +124,7 @@ Redis    = sticky / inflight / cooldown / shard lease / workset
 
 ```bash
 # 仅拉起依赖，不包含应用多进程完整编排
-docker compose -f deploy/scheme2/docker-compose.yml up -d
+docker compose -f docker-compose.postgres-redis.yml up -d
 # Postgres: postgres://gbp:gbp@127.0.0.1:5432/grokbuild_pool
 # Redis:    redis://127.0.0.1:6379/0
 ```

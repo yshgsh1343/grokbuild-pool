@@ -1,3 +1,9 @@
+# 方式 A：单机 SQLite（默认推荐）
+#   export ADMIN_KEY="$(openssl rand -hex 24)"
+#   docker compose -f docker-compose.sqlite.yml up -d --build
+#
+# 一个 pool-proxy 进程 + SQLite 数据卷。
+
 services:
   pool-proxy:
     build: .

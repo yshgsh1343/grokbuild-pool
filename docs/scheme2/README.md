@@ -82,7 +82,7 @@ bin/refresher -db ./data/pool.db --state memory
 ## 依赖服务（有 Docker 时，仍属未验证路径）
 
 ```bash
-docker compose -f deploy/scheme2/docker-compose.yml up -d
+docker compose -f docker-compose.postgres-redis.yml up -d
 psql postgres://gbp:gbp@127.0.0.1:5432/grokbuild_pool -c '\dt'
 ```
 
