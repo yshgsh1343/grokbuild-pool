@@ -72,11 +72,11 @@ anthropic:
     claude-sonnet-4-6: grok-4.5
     claude-opus-4: grok-4.5
     claude-opus-4-6: grok-4.5
-    claude-haiku-4: grok-composer-2.5-fast
-    claude-haiku-4-5: grok-composer-2.5-fast
+    claude-haiku-4: grok-4.5
+    claude-haiku-4-5: grok-4.5
     sonnet: grok-4.5
     opus: grok-4.5
-    haiku: grok-composer-2.5-fast
+    haiku: grok-4.5
   passthrough_prefixes: ["grok-"]
   strip_unknown_betas: true
   count_tokens: false

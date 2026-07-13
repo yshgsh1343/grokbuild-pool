@@ -31,11 +31,11 @@ func Default() Config {
 				"claude-sonnet-4-6": "grok-4.5",
 				"claude-opus-4":     "grok-4.5",
 				"claude-opus-4-6":   "grok-4.5",
-				"claude-haiku-4":    "grok-composer-2.5-fast",
-				"claude-haiku-4-5":  "grok-composer-2.5-fast",
+				"claude-haiku-4":    "grok-4.5",
+				"claude-haiku-4-5":  "grok-4.5",
 				"sonnet":            "grok-4.5",
 				"opus":              "grok-4.5",
-				"haiku":             "grok-composer-2.5-fast",
+				"haiku":             "grok-4.5",
 			},
 			PassthroughPrefixes: []string{"grok-"},
 			StripUnknownBetas:   true,
@@ -63,13 +63,13 @@ func (c AnthropicConfig) ResolveModel(model string) string {
 	// 请求兼容：旧/细分版号不出现在 /v1/models，但仍可调用。
 	switch {
 	case strings.HasPrefix(model, "claude-haiku-"):
-		return "grok-composer-2.5-fast"
+		return "grok-4.5"
 	case strings.HasPrefix(model, "claude-sonnet-"), strings.HasPrefix(model, "claude-opus-"):
 		return "grok-4.5"
 	case model == "sonnet" || model == "opus":
 		return "grok-4.5"
 	case model == "haiku":
-		return "grok-composer-2.5-fast"
+		return "grok-4.5"
 	}
 	return model
 }

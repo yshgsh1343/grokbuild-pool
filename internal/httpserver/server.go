@@ -256,7 +256,6 @@ func handleModels(w http.ResponseWriter, r *http.Request, opts Options) {
 		add(target, "xai")
 	}
 	add("grok-4.5", "xai")
-	add("grok-composer-2.5-fast", "xai")
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
