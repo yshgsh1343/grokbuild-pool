@@ -1,0 +1,41 @@
+# Scheme 2 bootstrap compose (Postgres + Redis + multi process)
+# Requires Docker. Current host may not have Docker; file is ready for deployment machines.
+#
+#   export ADMIN_KEY=...
+#   docker compose -f deploy/scheme2/docker-compose.yml up -d --build
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: gbp
+      POSTGRES_PASSWORD: gbp
+      POSTGRES_DB: grokbuild_pool
+    ports:
+      - "5432:5432"
+    volumes:
+      - scheme2-pg:/var/lib/postgresql/data
+      - ../../migrations/postgres/001_scheme2_init.sql:/docker-entrypoint-initdb.d/001_scheme2_init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U gbp -d grokbuild_pool"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  # Application services remain host-built until multi-stage Dockerfiles for
+  # gateway/worker/controlplane/refresher are added. Use:
+  #   make build-scheme2
+  # and run binaries against these dependencies.
+
+volumes:
+  scheme2-pg:
