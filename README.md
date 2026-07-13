@@ -17,7 +17,10 @@
 ## 功能
 - OpenAI Chat Completions / OpenAI Responses / Anthropic Messages 支持
 - 多账号池自动调度
-- SQLite 冷库与内存热池
+- 两种部署形态：
+  - **单机 SQLite**：`pool-proxy` 一进程（默认，推荐先用）
+  - **Postgres + Redis 多进程**：Gateway / Worker / ControlPlane / Refresher（Scheme 2，**尚未完成联调验证**）
+- SQLite 冷库与内存热池（默认路径）
 - 会话粘性与 Power-of-Two 选号
 - API 令牌、额度、RPM 和并发限制
 - Web 管理后台
@@ -34,13 +37,13 @@
 | 多供应商支持           | ✅                                    | ✅                                            | ✅                                    |
 | 图片、图片编辑与视频       | ❌                                    | 主要面向文本及多模态输入                                 | ✅                                    |
 | 多账号调度            | ✅                                    | ✅                                            | ✅                                    |
-| 调度特点             | SQLite 冷库、内存热池、会话粘性、Power-of-Two 选号  | 多 Provider、多账号轮询与负载均衡                        | 优先级、额度门控、会话粘性、冷却与故障切换                |
+| 调度特点             | SQLite 冷库、内存热池、会话粘性、Power-of-Two 选号；可选 Postgres/Redis 多进程骨架  | 多 Provider、多账号轮询与负载均衡                        | 优先级、额度门控、会话粘性、冷却与故障切换                |
 | 大规模账号池           | **核心设计目标**                           | 支持，但更侧重多 Provider 统一接入                       | 支持，更侧重完整功能与管理体验                      |
 | 客户端令牌管理          | ✅                                    | ✅                                            | ✅                                    |
 | 令牌额度与并发限制        | ✅                                    | ❌                                            | ✅                                    |
 | 内置管理后台           | ✅ 轻量管理页                              | ✅提供 Management API，也可搭配第三方 Dashboard         | ✅ 完整 React 管理后台                      |
-| 数据库              | SQLite                               |                                              | SQLite / PostgreSQL                  |
-| Redis 支持         | ❌                                    | ❌                                            | ✅                                    |
+| 数据库              | SQLite（默认）/ PostgreSQL（Scheme 2，未验证） |                                              | SQLite / PostgreSQL                  |
+| Redis 支持         | Scheme 2 可选（未验证）                      | ❌                                            | ✅                                    |
 | HTTP / SOCKS 代理池 | ❌                                    | ✅                                            | ✅                                    |
 | 更适合              | **只使用 Grok Build**，重视账号池规模、调度性能和轻量部署 | **个人使用，希望统一接入多个 AI CLI / OAuth Provider**    | **需要 Grok Build、Grok Web、媒体生成和完整后台** |
 
@@ -69,6 +72,119 @@ docker compose up -d --build
 首次启动时账号池为空，可以通过管理后台导入 JSON 或 SSO 数据。
 
 数据保存在 Docker Volume `pool-data` 中。
+
+## 两种部署方式
+
+项目现在有两条路径，**默认请先用方式 A**。
+
+| 方式 | 组件 | 存储 | 适合规模 | 状态 |
+| --- | --- | --- | --- | --- |
+| **A. 单机 SQLite** | 仅 `pool-proxy` | SQLite + 进程内热池/粘性 | 中小规模，先跑通 | **默认可用** |
+| **B. Postgres + Redis** | `gateway` + `worker` + `controlplane` + `refresher` | Postgres 冷库 + Redis 跨进程状态 | 目标 10 万级账号池 | **代码骨架已合入 main，尚未完成联调/压测验证** |
+
+> **重要备注**  
+> - 方式 B（Postgres + Redis 多进程）目前只完成接口、DDL、进程入口和协议挂载骨架。  
+> - **没有完成真实 Postgres/Redis 环境联调，也没有 14 万导入/压测验收。**  
+> - 生产/自用请优先方式 A；方式 B 仅供继续开发或实验，不保证可直接上线。
+
+### 方式 A：单机 SQLite（推荐）
+
+就是上面的「快速开始」：一个 `pool-proxy` 进程 + `data/pool.db`。
+
+```bash
+# Docker
+export ADMIN_KEY="$(openssl rand -hex 24)"
+docker compose up -d --build
+
+# 或本地二进制
+# make build
+# bin/pool-proxy -config config.example.yaml
+```
+
+特点：
+
+- 冷库：SQLite WAL（`data/pool.db`）
+- 热池 / sticky / inflight：进程内内存
+- 管理后台、导入导出、OpenAI/Anthropic 兼容 API 都在同一进程
+- 部署最简单，也是当前主路径
+
+### 方式 B：Postgres + Redis 多进程（实验，未验证）
+
+目标形态：
+
+```text
+Client → gateway → worker(s)
+                 ↗ controlplane（工作集/分片）
+                 ↗ refresher（token 刷新队列）
+Postgres = 账号冷库
+Redis    = sticky / inflight / cooldown / shard lease / workset
+```
+
+依赖（示例）：
+
+```bash
+# 仅拉起依赖，不包含应用多进程完整编排
+docker compose -f deploy/scheme2/docker-compose.yml up -d
+# Postgres: postgres://gbp:gbp@127.0.0.1:5432/grokbuild_pool
+# Redis:    redis://127.0.0.1:6379/0
+```
+
+迁移：
+
+```bash
+psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations/postgres/001_scheme2_init.sql
+```
+
+构建 Scheme 2 进程：
+
+```bash
+# 需要本机 Go 1.26+
+make build-scheme2
+# 产物：bin/gateway bin/worker bin/controlplane bin/refresher
+```
+
+启动示例（**实验命令，未做完整联调**）：
+
+```bash
+export DATABASE_URL='postgres://gbp:gbp@127.0.0.1:5432/grokbuild_pool'
+export REDIS_URL='redis://127.0.0.1:6379/0'
+
+# 控制面：构建分片工作集
+bin/controlplane --store postgres --database-url "$DATABASE_URL" \
+  --state redis --redis-url "$REDIS_URL" \
+  --workset 30000 --shards 64
+
+# Worker：本地热池 + /v1 协议
+bin/worker --worker-id worker-0 --listen 0.0.0.0:8081 \
+  --store postgres --database-url "$DATABASE_URL" \
+  --state redis --redis-url "$REDIS_URL" \
+  --hot-size 5000 --shards 64
+
+# Gateway：客户端入口
+bin/gateway --listen 0.0.0.0:8080 \
+  --workers http://127.0.0.1:8081 \
+  --state redis --redis-url "$REDIS_URL"
+
+# Refresher：token 到期队列（当前 OAuth 仍可能是占位/门控）
+bin/refresher --store postgres --database-url "$DATABASE_URL" \
+  --state redis --redis-url "$REDIS_URL"
+```
+
+也可用 SQLite 冷库 + Memory 状态做单机骨架冒烟（**同样不代表方式 B 已验证**）：
+
+```bash
+bin/controlplane --store sqlite --db ./data/pool.db --state memory
+bin/worker --store sqlite --db ./data/pool.db --state memory --listen 0.0.0.0:8081
+bin/gateway --workers http://127.0.0.1:8081 --state memory
+```
+
+相关文档：
+
+- `docs/scheme2/README.md`
+- `docs/scheme2/API_CONTRACTS.md`
+- `docs/scheme2/REDIS_KEYS.md`
+- `docs/scheme2/LOADTEST_ACCEPTANCE.md`
+- `migrations/postgres/001_scheme2_init.sql`
 
 ## 调度逻辑
 
