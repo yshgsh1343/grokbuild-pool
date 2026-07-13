@@ -16,6 +16,14 @@
   var KPI_HISTORY_KEY = "pool-admin-kpi-history";
   var KPI_HISTORY_MAX = 60; // 约 5 分钟（5s 轮询）
 
+  // 账号列表游标分页状态（API: GET /admin/accounts?cursor=&limit=）
+  var accPageSize = 50;
+  var accCursor = "";          // 当前页请求 cursor（首页为空）
+  var accNextCursor = "";      // 服务端返回的下一页 cursor
+  var accCursorStack = [];     // 历史 cursor，用于上一页
+  var accPageIndex = 1;        // 1-based 展示页码
+  var accLoading = false;
+
   function $(id) { return document.getElementById(id); }
 
   /** 轻量 toast；ok=true 成功边框，否则错误边框 */
@@ -940,10 +948,15 @@
     });
   }
 
-  /** 账号池列表：多选 + 批量启停 + 单行启停 */
+  /** 账号池列表：多选 + 批量启停 + 单行启停 + 游标翻页 */
   function renderAccounts() {
     stopPoll();
     setAuthed(true);
+    // 进入页面时重置到第一页
+    accCursor = "";
+    accNextCursor = "";
+    accCursorStack = [];
+    accPageIndex = 1;
     $("main").innerHTML = wrapPage(
       pageHd("账户管理", "冷存储脱敏列表 · 启停同步热池 · 批量最多 500",
         '<button type="button" class="page-action-btn" id="accRefresh">刷新</button>') +
@@ -953,12 +966,27 @@
       '<button type="button" class="btn btn-sm btn-secondary" id="accSelectNone" disabled>清空</button>' +
       '<button type="button" class="btn btn-sm btn-secondary" id="accBatchEnable" disabled>批量启用</button>' +
       '<button type="button" class="btn btn-sm btn-danger" id="accBatchDisable" disabled>批量禁用</button>' +
-      '<span class="muted" id="accSelCount">已选 0</span></div>' +
+      '<span class="muted" id="accSelCount">已选 0</span>' +
+      '<span class="toolbar-spacer"></span>' +
+      '<label class="acc-page-size-label" for="accPageSize">每页</label>' +
+      '<select id="accPageSize" class="input acc-page-size" title="每页条数">' +
+      '<option value="20">20</option>' +
+      '<option value="50" selected>50</option>' +
+      '<option value="100">100</option>' +
+      '<option value="200">200</option>' +
+      '</select></div>' +
       '<div id="accTable"><div class="empty">加载中…</div></div>' +
+      '<div class="pager" id="accPager">' +
+      '<button type="button" class="btn btn-sm btn-secondary" id="accPrev" disabled>上一页</button>' +
+      '<span class="muted" id="accPageInfo">第 1 页</span>' +
+      '<button type="button" class="btn btn-sm btn-secondary" id="accNext" disabled>下一页</button>' +
+      '</div>' +
       '<div id="accErr"></div></div>');
 
-
-    $("accRefresh").addEventListener("click", loadAccounts);
+    $("accRefresh").addEventListener("click", function () {
+      // 刷新保持当前页 cursor
+      loadAccounts();
+    });
     $("accSelectAll").addEventListener("click", function () {
       document.querySelectorAll("#accTable input.acc-check").forEach(function (cb) {
         cb.checked = true;
@@ -981,7 +1009,49 @@
     $("accBatchDisable").addEventListener("click", function () {
       runBatchAccounts("disable");
     });
+    $("accPrev").addEventListener("click", function () {
+      if (!accCursorStack.length || accLoading) return;
+      accCursor = accCursorStack.pop() || "";
+      accPageIndex = Math.max(1, accPageIndex - 1);
+      loadAccounts();
+    });
+    $("accNext").addEventListener("click", function () {
+      if (!accNextCursor || accLoading) return;
+      accCursorStack.push(accCursor);
+      accCursor = accNextCursor;
+      accPageIndex += 1;
+      loadAccounts();
+    });
+    $("accPageSize").addEventListener("change", function () {
+      var n = parseInt($("accPageSize").value, 10);
+      if (!n || n < 1) n = 50;
+      if (n > 200) n = 200;
+      accPageSize = n;
+      // 改每页条数后回到首页
+      accCursor = "";
+      accNextCursor = "";
+      accCursorStack = [];
+      accPageIndex = 1;
+      loadAccounts();
+    });
+    // 同步 select 与状态
+    $("accPageSize").value = String(accPageSize);
     loadAccounts();
+  }
+
+  function updateAccPagerUI(pageCount) {
+    var prev = $("accPrev");
+    var next = $("accNext");
+    var info = $("accPageInfo");
+    if (prev) prev.disabled = accLoading || accCursorStack.length === 0;
+    if (next) next.disabled = accLoading || !accNextCursor;
+    if (info) {
+      var bits = ["第 " + accPageIndex + " 页"];
+      if (pageCount != null) bits.push("本页 " + pageCount + " 条");
+      if (accNextCursor) bits.push("有后续");
+      else if (pageCount > 0) bits.push("已到末页");
+      info.textContent = bits.join(" · ");
+    }
   }
 
   function selectedAccountIds() {
@@ -1055,13 +1125,34 @@
     var errBox = $("accErr");
     if (!host) return;
     if (errBox) errBox.innerHTML = "";
-    api("/admin/accounts?limit=100").then(function (res) {
+    accLoading = true;
+    updateAccPagerUI(null);
+    host.innerHTML = '<div class="empty">加载中…</div>';
+
+    var limit = accPageSize > 0 ? accPageSize : 50;
+    if (limit > 200) limit = 200;
+    var q = "/admin/accounts?limit=" + encodeURIComponent(String(limit));
+    if (accCursor) q += "&cursor=" + encodeURIComponent(accCursor);
+
+    api(q).then(function (res) {
+      accLoading = false;
       var list = (res && res.accounts) || [];
+      accNextCursor = (res && res.next_cursor) ? String(res.next_cursor) : "";
       if (!list.length) {
+        if (accPageIndex > 1) {
+          // 当前页空了（例如尾页被删光）：回退上一页
+          if (accCursorStack.length) {
+            accCursor = accCursorStack.pop() || "";
+            accPageIndex = Math.max(1, accPageIndex - 1);
+            loadAccounts();
+            return;
+          }
+        }
         host.innerHTML =
           '<div class="empty"><strong>暂无账号</strong>' +
-          "请用 poolctl import / bulkimport 导入凭证后再刷新。</div>";
+          "请用 poolctl import / bulkimport 或管理台导入后再刷新。</div>";
         updateAccSelUI();
+        updateAccPagerUI(0);
         return;
       }
       var rows = list.map(function (a) {
@@ -1108,6 +1199,7 @@
         cb.addEventListener("change", updateAccSelUI);
       });
       updateAccSelUI();
+      updateAccPagerUI(list.length);
 
       host.querySelectorAll("button[data-act]").forEach(function (btn) {
         btn.addEventListener("click", function () {
@@ -1130,6 +1222,7 @@
         });
       });
     }).catch(function (e) {
+      accLoading = false;
       if (handleAuthError(e)) return;
       host.innerHTML = "";
       if (errBox) {
@@ -1139,6 +1232,7 @@
       }
       toast(e.message, false);
       updateAccSelUI();
+      updateAccPagerUI(0);
     });
   }
 

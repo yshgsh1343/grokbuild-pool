@@ -1217,3 +1217,40 @@ body.nav-open {
 .admin-main main#main {
   display: block;
 }
+
+/* Accounts pager */
+.pager {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  justify-content: flex-end;
+  padding: 12px 4px 4px;
+  flex-wrap: wrap;
+}
+.pager .muted {
+  font-size: 13px;
+}
+.toolbar-spacer {
+  flex: 1 1 auto;
+  min-width: 8px;
+}
+.acc-page-size-label {
+  display: inline;
+  margin: 0 4px 0 0;
+  font-size: 12px;
+  color: var(--color-text-secondary);
+}
+.acc-page-size {
+  width: auto;
+  min-width: 72px;
+  min-height: 28px;
+  padding: 0 8px;
+  font-size: 12px;
+  border-radius: 999px;
+}
+.acc-batch-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
