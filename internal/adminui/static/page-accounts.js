@@ -90,6 +90,17 @@ function fmtNum(v, digits) {
   return n.toFixed(digits);
 }
 
+
+function displayEmail(a) {
+  if (!a) return "—";
+  var e = (a.email && String(a.email).trim()) || "";
+  if (e) return e;
+  var n = (a.name && String(a.name).trim()) || "";
+  if (n && n.indexOf("@") >= 0) return n;
+  if (n && !/^acct-|^[0-9a-f]{8}-[0-9a-f]{4}-/i.test(n) && n.length < 80) return n;
+  return "—";
+}
+
 function formatBilling(a) {
   var b = a && a.billing;
   if (!b) {
@@ -297,7 +308,7 @@ function loadAccounts(opts) {
         '<td><input type="checkbox" class="acc-check" data-id="' +
           esc(a.id) + '" /></td>' +
         '<td class="mono">' + esc(a.id) + "</td>" +
-        "<td>" + esc(a.email || "—") + "</td>" +
+        "<td title=\"" + esc(a.email || a.name || a.id || "") + "\">" + esc(displayEmail(a)) + "</td>" +
         "<td>" + accountStatusBadges(a) + "</td>" +
         "<td>" + formatSuccessRate(a) + "</td>" +
         "<td>" + formatInflight(a) + "</td>" +
@@ -323,7 +334,7 @@ function loadAccounts(opts) {
     host.innerHTML =
       '<div class="table-wrap"><table><thead><tr>' +
       '<th><input type="checkbox" id="accCheckAll" title="全选本页" /></th>' +
-      "<th>ID</th><th>Email</th><th>状态</th><th>成功率</th><th>并发</th><th>额度/测活</th><th>生命周期</th>" +
+      "<th>ID</th><th>邮箱</th><th>状态</th><th>成功率</th><th>并发</th><th>额度/测活</th><th>生命周期</th>" +
       "<th>优先级</th><th>代理</th><th></th>" +
       "</tr></thead><tbody>" + rows + "</tbody></table></div>";
 
@@ -494,7 +505,7 @@ function openAccountDetail(account) {
   document.body.classList.add("dialog-open");
   accountDetailRoot = root;
   root.querySelector(".account-detail-title").textContent = account.id;
-  root.querySelector(".account-detail-sub").textContent = (account.email || "—") + " · " + (account.lifecycle || "—");
+  root.querySelector(".account-detail-sub").textContent = displayEmail(account) + " · " + (account.lifecycle || "—");
   var body = root.querySelector(".account-detail-body");
   body.innerHTML =
     '<div><div class="account-detail-section-title">状态</div>' + accountStatusBadges(account) +

@@ -247,6 +247,7 @@ func (h *Handlers) Mount(mux *http.ServeMux) {
 	mux.HandleFunc("PATCH /admin/accounts/{id}", h.RequireAdmin(h.PatchAccountProxy))
 	// 导入任务（P1 最小接线）
 	mux.HandleFunc("GET /admin/import/jobs", h.RequireAdmin(h.ListImportJobs))
+		mux.HandleFunc("GET /admin/import/server-dir", h.RequireAdmin(h.ListServerImportDir))
 	mux.HandleFunc("POST /admin/import/jobs", h.RequireAdmin(h.CreateImportJob))
 	mux.HandleFunc("GET /admin/import/jobs/{id}", h.RequireAdmin(h.GetImportJob))
 }

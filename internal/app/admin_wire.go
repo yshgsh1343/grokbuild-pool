@@ -98,6 +98,7 @@ func wireAdmin(cfg config.Config, pool *poolStack, up *upstreamStack, metrics *h
 		ImportJobTimeoutSec:          cfg.Imports.JobTimeoutSec,
 		ImportStagingStaleAfterSec:   cfg.Imports.StagingStaleAfterSec,
 		ImportAllowServerPath:        cfg.Imports.AllowServerPath,
+		ImportServerDir:              "",
 		ImportSSOEndpoint:            sso.Endpoint,
 		ImportSSOAPIKeySet:           strings.TrimSpace(sso.Endpoint) != "" && strings.TrimSpace(sso.APIKey) != "",
 		ImportSSOMaxBatch:            sso.MaxBatch,
@@ -235,6 +236,7 @@ func wireAdmin(cfg config.Config, pool *poolStack, up *upstreamStack, metrics *h
 			JobTimeout:         time.Duration(cfg.Imports.JobTimeoutSec) * time.Second,
 			StagingStaleAfter:  time.Duration(cfg.Imports.StagingStaleAfterSec) * time.Second,
 			AllowServerPath:    cfg.Imports.AllowServerPath,
+			ServerDir:          "",
 			Converter:          ssoConverter,
 			AfterImport: func() error {
 				// 导入 canary：先只装一部分进热池，并短时抑制全量周期重载。
@@ -361,6 +363,7 @@ func wireAdmin(cfg config.Config, pool *poolStack, up *upstreamStack, metrics *h
 			JobTimeout:         time.Duration(in.ImportJobTimeoutSec) * time.Second,
 			StagingStaleAfter:  time.Duration(in.ImportStagingStaleAfterSec) * time.Second,
 			AllowServerPath:    in.ImportAllowServerPath,
+			ServerDir:          strings.TrimSpace(in.ImportServerDir),
 			Converter:          conv,
 			AfterImport: func() error {
 				// 导入 canary：先只装一部分进热池，并短时抑制全量周期重载。
@@ -508,6 +511,9 @@ func mergeSettingsDefaults(loaded, base admin.RuntimeSettings) admin.RuntimeSett
 	}
 	if out.ImportSSOEndpoint == "" {
 		out.ImportSSOEndpoint = base.ImportSSOEndpoint
+	}
+	if out.ImportServerDir == "" {
+		out.ImportServerDir = base.ImportServerDir
 	}
 	if out.ImportSSOMaxBatch <= 0 {
 		out.ImportSSOMaxBatch = base.ImportSSOMaxBatch

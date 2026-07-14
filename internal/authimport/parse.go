@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -452,7 +453,11 @@ func closeJSONContainer(decoder *json.Decoder, expected json.Delim) error {
 }
 
 func normalizeEntry(sourceKey string, entry GrokAuthEntry) (ImportedCredential, error) {
-	access := firstNonEmpty(strings.TrimSpace(entry.Key), strings.TrimSpace(entry.AccessToken))
+	// 优先 access_token；key 仅在无 access_token 时作为 CPA 兼容（部分导出把 token 放 key）
+	access := strings.TrimSpace(entry.AccessToken)
+	if access == "" {
+		access = strings.TrimSpace(entry.Key)
+	}
 	refresh := strings.TrimSpace(entry.RefreshToken)
 	if access == "" && refresh == "" {
 		return ImportedCredential{}, fmt.Errorf("authimport: entry %q has no tokens", sourceKey)
@@ -777,11 +782,45 @@ func AccountIDFromIdentity(identity string) string {
 	return "acct-" + hex.EncodeToString(sum[:12])
 }
 
+// emailFromAccessToken 尽力从 JWT payload 取 email（不验签，仅导入展示用）。
+func emailFromAccessToken(access string) string {
+	parts := strings.Split(access, ".")
+	if len(parts) < 2 {
+		return ""
+	}
+	seg := parts[1]
+	if m := len(seg) % 4; m != 0 {
+		seg += strings.Repeat("=", 4-m)
+	}
+	raw, err := base64.URLEncoding.DecodeString(seg)
+	if err != nil {
+		// try RawURLEncoding
+		raw, err = base64.RawURLEncoding.DecodeString(parts[1])
+		if err != nil {
+			return ""
+		}
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		return ""
+	}
+	if e, ok := payload["email"].(string); ok {
+		return strings.TrimSpace(e)
+	}
+	if e, ok := payload["preferred_username"].(string); ok && strings.Contains(e, "@") {
+		return strings.TrimSpace(e)
+	}
+	return ""
+}
+
 // ToAccount 将导入凭证映射为适合 UpsertMany 的 catalog.Account。
 // 冷存储模式缺少必要令牌时返回错误。
 func ToAccount(c ImportedCredential, now time.Time) (catalog.Account, error) {
 	access := strings.TrimSpace(c.AccessToken)
 	refresh := strings.TrimSpace(c.RefreshToken)
+	if strings.TrimSpace(c.Email) == "" {
+		c.Email = emailFromAccessToken(access)
+	}
 	if access == "" {
 		return catalog.Account{}, fmt.Errorf("authimport: missing access_token for %q", c.SourceKey)
 	}

@@ -81,6 +81,8 @@ type RuntimeSettings struct {
 	ImportJobTimeoutSec        int    `json:"import_job_timeout_sec"`
 	ImportStagingStaleAfterSec int    `json:"import_staging_stale_after_sec"`
 	ImportAllowServerPath      bool   `json:"import_allow_server_path"`
+	// ImportServerDir 允许服务端导入的根目录（空=dataDir；须 allow_server_path）
+	ImportServerDir           string `json:"import_server_dir"`
 	ImportSSOEndpoint          string `json:"import_sso_endpoint"`
 	ImportSSOAPIKeySet         bool   `json:"import_sso_api_key_set"`       // 只读展示
 	ImportSSOAPIKey            string `json:"import_sso_api_key,omitempty"` // 仅 PUT 写入，GET 不回传明文
@@ -549,6 +551,9 @@ func (c *SettingsController) Apply(in RuntimeSettings) (RuntimeSettings, error) 
 	}
 	if in.ImportSSOEndpoint == "" {
 		in.ImportSSOEndpoint = prev.ImportSSOEndpoint
+	}
+	if in.ImportServerDir == "" {
+		in.ImportServerDir = prev.ImportServerDir
 	}
 	if in.ImportSSOMaxBatch <= 0 {
 		in.ImportSSOMaxBatch = prev.ImportSSOMaxBatch

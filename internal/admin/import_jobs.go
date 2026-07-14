@@ -5,6 +5,8 @@ import (
 	"io"
 	"mime"
 	"net/http"
+	"path/filepath"
+	"os"
 	"strings"
 
 	"github.com/yshgsh1343/grokbuild2api/internal/importjobs"
@@ -36,11 +38,14 @@ func (h *Handlers) ListImportJobs(w http.ResponseWriter, r *http.Request) {
 		limits["job_timeout_sec"] = int(opts.JobTimeout.Seconds())
 		limits["staging_stale_after_sec"] = int(opts.StagingStaleAfter.Seconds())
 		limits["allow_server_path"] = opts.AllowServerPath
+		limits["import_server_dir"] = strings.TrimSpace(opts.ServerDir)
 	}
 	if h.Settings != nil {
 		s := h.Settings.Snapshot()
 		limits["import_workers"] = s.ImportWorkers
 		limits["import_sso_workers"] = s.ImportSSOWorkers
+		limits["import_server_dir"] = strings.TrimSpace(s.ImportServerDir)
+		limits["import_allow_server_path"] = s.ImportAllowServerPath
 		limits["import_sso_max_batch"] = s.ImportSSOMaxBatch
 		limits["import_canary_hot_size"] = s.ImportCanaryHotSize
 		limits["import_canary_hold_sec"] = s.ImportCanaryHoldSec
@@ -319,4 +324,97 @@ func (h *Handlers) ssoConverterConfigured() bool {
 	ep := strings.TrimSpace(h.Config.Imports.SSOConverter.Endpoint)
 	key := strings.TrimSpace(h.Config.Imports.SSOConverter.APIKey)
 	return ep != "" && key != ""
+}
+
+
+// ListServerImportDir GET /admin/import/server-dir?path=
+// 列出配置的 import_server_dir（或 dataDir）下的文件，供管理台服务端导入。
+func (h *Handlers) ListServerImportDir(w http.ResponseWriter, r *http.Request) {
+	if !h.importAllowServerPath() {
+		writeErr(w, http.StatusForbidden, "服务端路径导入未启用（设置 import_allow_server_path）")
+		return
+	}
+	root := ""
+	if h.Settings != nil {
+		root = strings.TrimSpace(h.Settings.Snapshot().ImportServerDir)
+	}
+	if root == "" {
+		root = strings.TrimSpace(h.Config.DataDir)
+	}
+	if root == "" {
+		writeErr(w, http.StatusBadRequest, "未配置 import_server_dir / data_dir")
+		return
+	}
+	// optional subpath under root
+	sub := strings.TrimSpace(r.URL.Query().Get("path"))
+	target := root
+	if sub != "" && sub != "." {
+		// prevent escape
+		clean := filepath.Clean("/" + sub)
+		clean = strings.TrimPrefix(clean, "/")
+		target = filepath.Join(root, clean)
+	}
+	absRoot, err := filepath.Abs(root)
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, "import_server_dir 无效")
+		return
+	}
+	absTarget, err := filepath.Abs(target)
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, "path 无效")
+		return
+	}
+	rel, err := filepath.Rel(absRoot, absTarget)
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		writeErr(w, http.StatusBadRequest, "path 越界")
+		return
+	}
+	st, err := os.Stat(absTarget)
+	if err != nil {
+		writeErr(w, http.StatusNotFound, "目录不存在: "+absTarget)
+		return
+	}
+	if !st.IsDir() {
+		writeErr(w, http.StatusBadRequest, "不是目录")
+		return
+	}
+	entries, err := os.ReadDir(absTarget)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	type item struct {
+		Name  string `json:"name"`
+		Path  string `json:"path"`
+		IsDir bool   `json:"is_dir"`
+		Size  int64  `json:"size,omitempty"`
+	}
+	out := make([]item, 0, len(entries))
+	for _, e := range entries {
+		name := e.Name()
+		if strings.HasPrefix(name, ".") {
+			continue
+		}
+		full := filepath.Join(absTarget, name)
+		it := item{Name: name, Path: full, IsDir: e.IsDir()}
+		if info, err := e.Info(); err == nil && !e.IsDir() {
+			it.Size = info.Size()
+		}
+		// filter common import extensions for files
+		if !e.IsDir() {
+			ext := strings.ToLower(filepath.Ext(name))
+			switch ext {
+			case ".json", ".txt", ".ndjson", ".jsonl":
+			default:
+				continue
+			}
+		}
+		out = append(out, it)
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"root":    absRoot,
+		"path":    absTarget,
+		"entries": out,
+		"note":    "提交服务端导入: POST /admin/import/jobs JSON {format,path}",
+	})
 }

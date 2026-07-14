@@ -73,6 +73,8 @@ type Options struct {
 	JobTimeout         time.Duration
 	StagingStaleAfter  time.Duration
 	AllowServerPath    bool
+	// ServerDir 可选：服务端导入允许的根目录；空则仅 dataDir
+	ServerDir          string
 	Converter          ssoimport.Converter
 	AfterImport        func() error
 }
@@ -198,6 +200,12 @@ func (m *Manager) ApplyOptions(in Options) {
 	}
 	// bool 与 converter 显式覆盖
 	cur.AllowServerPath = in.AllowServerPath
+	if strings.TrimSpace(in.ServerDir) != "" {
+		cur.ServerDir = strings.TrimSpace(in.ServerDir)
+	} else if in.ServerDir == "" {
+		// 允许显式清空：用空串覆盖
+		cur.ServerDir = strings.TrimSpace(in.ServerDir)
+	}
 	if in.Converter != nil {
 		cur.Converter = in.Converter
 	}
@@ -818,35 +826,67 @@ func (m *Manager) safeStagedPath(path string) (string, error) {
 	return path, nil
 }
 
-// safePath 校验旧 path 必须解析到 dataDir 内的普通单文件，且阻止 symlink 逃逸。
+// safePath 校验 path 落在 dataDir 或配置的 ServerDir 下；可为普通文件或目录。
+// 阻止 symlink 逃逸。
 func (m *Manager) safePath(p string) (string, error) {
 	p = strings.TrimSpace(p)
 	if p == "" {
 		return "", ErrInvalidPath
 	}
+	m.mu.Lock()
+	dataDir := m.dataDir
+	serverDir := strings.TrimSpace(m.opts.ServerDir)
+	m.mu.Unlock()
+
 	var abs string
 	if filepath.IsAbs(p) {
 		abs = filepath.Clean(p)
 	} else {
-		abs = filepath.Clean(filepath.Join(m.dataDir, p))
+		base := dataDir
+		if serverDir != "" {
+			base = serverDir
+		}
+		abs = filepath.Clean(filepath.Join(base, p))
 	}
-	realRoot, err := filepath.EvalSymlinks(m.dataDir)
-	if err != nil {
+
+	roots := []string{dataDir}
+	if serverDir != "" {
+		roots = append(roots, serverDir)
+	}
+	var lastErr error
+	for _, root := range roots {
+		realRoot, err := filepath.EvalSymlinks(root)
+		if err != nil {
+			// root 不存在时尝试 Mkdir 不自动做；跳过
+			lastErr = err
+			continue
+		}
+		realPath, err := filepath.EvalSymlinks(abs)
+		if err != nil {
+			// 可能是尚未存在的路径；若 abs 在 root 下仍拒绝（必须存在）
+			lastErr = err
+			continue
+		}
+		rel, err := filepath.Rel(realRoot, realPath)
+		if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+			lastErr = ErrInvalidPath
+			continue
+		}
+		st, err := os.Lstat(realPath)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		// 允许普通文件或目录（bulkimport 可扫目录）
+		if !st.Mode().IsRegular() && !st.IsDir() {
+			return "", ErrInvalidPath
+		}
+		return realPath, nil
+	}
+	if lastErr != nil {
 		return "", ErrInvalidPath
 	}
-	realPath, err := filepath.EvalSymlinks(abs)
-	if err != nil {
-		return "", ErrInvalidPath
-	}
-	rel, err := filepath.Rel(realRoot, realPath)
-	if err != nil || rel == "." || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
-		return "", ErrInvalidPath
-	}
-	st, err := os.Lstat(realPath)
-	if err != nil || !st.Mode().IsRegular() {
-		return "", ErrInvalidPath
-	}
-	return realPath, nil
+	return "", ErrInvalidPath
 }
 
 func sanitizeSourceName(name string) string {

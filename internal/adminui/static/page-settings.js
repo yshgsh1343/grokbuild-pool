@@ -244,6 +244,7 @@ export function renderSettings() {
         field("任务超时秒", "sImpTO", s.import_job_timeout_sec) +
         field("Staging 过期秒", "sImpStale", s.import_staging_stale_after_sec) +
         fieldBool("允许服务端路径", "sImpPath", !!s.import_allow_server_path) +
+        fieldText("服务端导入根目录", "sImpServerDir", s.import_server_dir || "", "/data/imports 或空=data_dir") +
         fieldText("SSO Endpoint", "sSsoEp", s.import_sso_endpoint || "", "https://…/v1/convert") +
         fieldText("SSO API Key(留空不改)", "sSsoKey", "", s.import_sso_api_key_set ? "已配置 · 留空保持" : "未配置") +
         field("SSO max_batch", "sSsoBatch", s.import_sso_max_batch) +
@@ -349,6 +350,7 @@ export function renderSettings() {
       import_job_timeout_sec: numI("sImpTO"),
       import_staging_stale_after_sec: numI("sImpStale"),
       import_allow_server_path: bool("sImpPath"),
+      import_server_dir: str("sImpServerDir"),
       import_sso_endpoint: str("sSsoEp"),
       import_sso_max_batch: numI("sSsoBatch"),
       import_sso_timeout_sec: numI("sSsoTO"),

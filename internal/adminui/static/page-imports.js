@@ -61,8 +61,14 @@ export function renderImportJobs() {
     '<div class="form-row">' +
     '<div><label for="impFormat">格式</label>' +
     '<select id="impFormat" class="input"><option value="sso" selected>SSO</option><option value="json">JSON</option><option value="ndjson">NDJSON</option></select></div>' +
-    '<div><label for="impFile">本地文件（可多选）</label>' +
+    '<div><label for="impFile">本地上传（可多选）</label>' +
     '<input id="impFile" class="input file-input" type="file" multiple accept=".txt,.json,text/plain,application/json" /></div></div>' +
+    '<div class="form-row" id="impServerRow" style="margin-top:10px">' +
+    '<div style="flex:1"><label for="impServerPath">服务端路径（文件或目录）</label>' +
+    '<input id="impServerPath" class="input mono" type="text" placeholder="需在设置中开启「允许服务端路径」并配置导入根目录" /></div>' +
+    '<div style="align-self:flex-end"><button type="button" class="btn btn-secondary" id="impServerBrowse">浏览目录</button></div>' +
+    '<div style="align-self:flex-end"><button type="button" class="btn btn-secondary" id="impServerSubmit">从服务端导入</button></div></div>' +
+    '<div id="impServerList" class="imp-file-list muted"></div>' +
     '<p class="muted panel-note import-limit-note" id="impLimits">默认 SSO→JSON · 最多 10000 条 · 可一次选多个文件，每个文件一个任务 · 正在读取服务端限制…</p>' +
     '<div id="impFileList" class="imp-file-list muted"></div>' +
     '<div class="toolbar form-actions">' +
@@ -133,11 +139,17 @@ export function renderImportJobs() {
           : ("体积兜底 " + Math.round(importMaxUpload / 1048576) + " MiB");
         var en = limits.enabled;
         if (en === undefined || en === null) en = true;
+        if (limits.import_allow_server_path != null) serverDirEnabled = !!limits.import_allow_server_path;
+        if (limits.allow_server_path != null) serverDirEnabled = serverDirEnabled || !!limits.allow_server_path;
+        if (limits.import_server_dir) serverRoot = String(limits.import_server_dir);
+        var serverHint = serverDirEnabled
+          ? (" · 服务端导入开" + (serverRoot ? (" · 根目录 " + serverRoot) : " · 根=data_dir"))
+          : " · 服务端导入关（设置开启）";
         note.textContent = "默认 SSO→JSON · 最多 " + importMaxEntries +
           " 条 · " + sizeHint + " · 可多选文件（每个文件一个任务） · 导入" +
           (en ? "已启用" : "已关闭（设置页打开 import_enabled）") +
           " · 转换器" +
-          (limits.sso_converter_configured ? "已就绪（内置 Go Device Flow）" : "未就绪");
+          (limits.sso_converter_configured ? "已就绪（内置 Go Device Flow）" : "未就绪") + serverHint;
       }
       renderActive(list);
       var host = $("impTable");
@@ -236,6 +248,87 @@ export function renderImportJobs() {
   if (fileInput) {
     fileInput.addEventListener("change", renderFileList);
   }
+  
+  var serverDirEnabled = false;
+  var serverRoot = "";
+
+  function loadServerDir(sub) {
+    var q = "/admin/import/server-dir";
+    if (sub) q += "?path=" + encodeURIComponent(sub);
+    return api(q).then(function (res) {
+      serverRoot = (res && res.root) || "";
+      var host = $("impServerList");
+      var entries = (res && res.entries) || [];
+      if (host) {
+        if (!entries.length) {
+          host.innerHTML = '<div class="muted">目录为空或不含 .json/.txt/.ndjson</div>';
+        } else {
+          host.innerHTML = '<div class="muted" style="margin:6px 0">当前: ' + esc((res && res.path) || "") +
+            (serverRoot ? ' · 根: ' + esc(serverRoot) : "") + "</div><ul class=\"imp-server-ul\">" +
+            entries.map(function (e) {
+              return '<li><button type="button" class="btn btn-sm btn-secondary imp-server-item" data-path="' +
+                esc(e.path) + '" data-dir="' + (e.is_dir ? "1" : "0") + '">' +
+                esc(e.is_dir ? "[目录] " : "") + esc(e.name) +
+                (e.size ? " · " + esc(formatBytes(e.size)) : "") +
+                "</button></li>";
+            }).join("") + "</ul>";
+          host.querySelectorAll(".imp-server-item").forEach(function (btn) {
+            btn.addEventListener("click", function () {
+              var path = btn.getAttribute("data-path") || "";
+              var isDir = btn.getAttribute("data-dir") === "1";
+              if (isDir) {
+                // relative from root if possible
+                var rel = path;
+                if (serverRoot && path.indexOf(serverRoot) === 0) {
+                  rel = path.slice(serverRoot.length).replace(/^\/+/, "");
+                }
+                loadServerDir(rel);
+              } else {
+                var inp = $("impServerPath");
+                if (inp) inp.value = path;
+              }
+            });
+          });
+        }
+      }
+    }).catch(function (e) {
+      if (handleAuthError(e)) return;
+      var host = $("impServerList");
+      if (host) host.innerHTML = '<div class="err-box">' + esc(e.message || "无法浏览服务端目录") + "</div>";
+    });
+  }
+
+  var browseBtn = $("impServerBrowse");
+  if (browseBtn) {
+    browseBtn.addEventListener("click", function () {
+      loadServerDir("");
+    });
+  }
+  var serverSubmit = $("impServerSubmit");
+  if (serverSubmit) {
+    serverSubmit.addEventListener("click", function () {
+      var path = ($("impServerPath") && $("impServerPath").value || "").trim();
+      if (!path) {
+        toast("请填写服务端文件或目录路径", "warning");
+        return;
+      }
+      var format = $("impFormat").value;
+      withButtonLoading(serverSubmit, "提交中…", function () {
+        return api("/admin/import/jobs", {
+          method: "POST",
+          body: { format: format, path: path }
+        }).then(function () {
+          toast("已创建服务端导入任务", "success");
+          return loadJobs();
+        }).catch(function (e) {
+          if (handleAuthError(e)) return;
+          toast(e.message || "服务端导入失败", "danger");
+          setImportError(e.message || "服务端导入失败");
+        });
+      });
+    });
+  }
+
   $("impSubmit").addEventListener("click", function () {
     var input = $("impFile");
     var files = selectedImportFiles();
