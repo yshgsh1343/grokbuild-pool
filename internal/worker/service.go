@@ -102,18 +102,18 @@ func (c Config) normalize() Config {
 
 // Service is the Scheme2 worker runtime.
 type Service struct {
-	cfg     Config
-	store   store.AccountStore
-	state   clusterstate.State
-	idx     *hot.Index
-	sel     *selector.Selector
-	leaser  *storeLeaser
-	exec    *executor.Executor
-	openai  *openai.Handlers
-	anth    *anthropic.Handlers
-	log     *slog.Logger
-	mu      sync.Mutex
-	shards  map[int]clusterstate.ShardLease
+	cfg    Config
+	store  store.AccountStore
+	state  clusterstate.State
+	idx    *hot.Index
+	sel    *selector.Selector
+	leaser *storeLeaser
+	exec   *executor.Executor
+	openai *openai.Handlers
+	anth   *anthropic.Handlers
+	log    *slog.Logger
+	mu     sync.Mutex
+	shards map[int]clusterstate.ShardLease
 }
 
 func New(cfg Config, st store.AccountStore, cs clusterstate.State, log *slog.Logger) *Service {
@@ -421,11 +421,10 @@ func max(a, b int) int {
 
 // AcquireWithCluster is retained for tests/debug.
 func (s *Service) AcquireWithCluster(ctx context.Context, stickyKey string, maxAttempts int) (string, error) {
-	l, err := s.leaser.Acquire(ctx, stickyKey)
+	l, err := s.leaser.Acquire(ctx, stickyKey, "")
 	if err != nil {
 		return "", err
 	}
 	_ = maxAttempts
 	return l.AccountID, nil
 }
-

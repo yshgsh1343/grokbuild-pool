@@ -4,10 +4,10 @@ import "errors"
 
 // catalog 操作的哨兵错误。
 var (
-	ErrNotFound      = errors.New("catalog: account not found")
-	ErrCASConflict   = errors.New("catalog: revision conflict")
-	ErrInvalidInput  = errors.New("catalog: invalid input")
-	ErrClosed        = errors.New("catalog: closed")
+	ErrNotFound     = errors.New("catalog: account not found")
+	ErrCASConflict  = errors.New("catalog: revision conflict")
+	ErrInvalidInput = errors.New("catalog: invalid input")
+	ErrClosed       = errors.New("catalog: closed")
 )
 
 // accounts.lifecycle 字段的取值。
@@ -133,20 +133,24 @@ type AccountSummary struct {
 	Inflight int32 `json:"inflight"`
 	// Billing 最近一次测活/额度快照（脱敏，来自 billing_json）
 	Billing *AccountBillingView `json:"billing,omitempty"`
+	// CooldownRemainingSec 列表时计算：max(0, cooldown_until-now)
+	CooldownRemainingSec int64 `json:"cooldown_remaining_sec"`
+	// StatusReason 人类可读原因：冷却/隔离/禁用/无令牌/测活失败等
+	StatusReason string `json:"status_reason,omitempty"`
 }
 
 // AccountBillingView 管理台展示用额度/测活摘要（无密钥）。
 type AccountBillingView struct {
-	MonthlyUsed          *float64 `json:"monthly_used,omitempty"`
-	MonthlyLimit         *float64 `json:"monthly_limit,omitempty"`
-	WeeklyUsagePercent   *float64 `json:"weekly_usage_percent,omitempty"`
-	GrokBuildPercent     *float64 `json:"grok_build_percent,omitempty"`
-	PeriodEnd            string   `json:"period_end,omitempty"`
-	ProbeOK              *bool    `json:"probe_ok,omitempty"`
-	ProbeStatus          int      `json:"probe_status,omitempty"`
-	ProbeError           string   `json:"probe_error,omitempty"`
-	ProbedAt             int64    `json:"probed_at,omitempty"`
-	UpdatedAt            int64    `json:"updated_at,omitempty"`
+	MonthlyUsed        *float64 `json:"monthly_used,omitempty"`
+	MonthlyLimit       *float64 `json:"monthly_limit,omitempty"`
+	WeeklyUsagePercent *float64 `json:"weekly_usage_percent,omitempty"`
+	GrokBuildPercent   *float64 `json:"grok_build_percent,omitempty"`
+	PeriodEnd          string   `json:"period_end,omitempty"`
+	ProbeOK            *bool    `json:"probe_ok,omitempty"`
+	ProbeStatus        int      `json:"probe_status,omitempty"`
+	ProbeError         string   `json:"probe_error,omitempty"`
+	ProbedAt           int64    `json:"probed_at,omitempty"`
+	UpdatedAt          int64    `json:"updated_at,omitempty"`
 }
 
 // ProxyAssignment 批量设置代理的一项（SetProxies）。

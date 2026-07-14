@@ -27,8 +27,8 @@ const DefaultMaxAttempts = 2
 
 // Leaser 为 protocol executor 使用的 lease.Manager 子集。
 type Leaser interface {
-	Acquire(ctx context.Context, stickyKey string) (lease.Lease, error)
-	AcquireAttempt(ctx context.Context, stickyKey string, tried map[string]struct{}) (lease.Lease, error)
+	Acquire(ctx context.Context, stickyKey, model string) (lease.Lease, error)
+	AcquireAttempt(ctx context.Context, stickyKey, model string, tried map[string]struct{}) (lease.Lease, error)
 	Release(ctx context.Context, l lease.Lease, result lease.Result) error
 }
 
@@ -126,7 +126,7 @@ func (e *Executor) Post(ctx context.Context, model, convID string, body []byte, 
 			return nil, err
 		}
 
-		l, err := e.Leaser.AcquireAttempt(ctx, convID, tried)
+		l, err := e.Leaser.AcquireAttempt(ctx, convID, model, tried)
 		if err != nil {
 			if errors.Is(err, lease.ErrNoAccount) {
 				if lastResp != nil {

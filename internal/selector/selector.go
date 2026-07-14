@@ -95,16 +95,23 @@ func (s *Selector) PickExcluding(now int64, stickyKey string, exclude map[string
 	sticky := s.sticky
 	s.mu.RUnlock()
 
-	// 1) 粘性命中且仍合格、未被排除。
+	// 1) 粘性：先 primary，再 secondary；都不可用才重选。
+	var stickyPrimary, stickySecondary string
 	if stickyKey != "" {
-		if aid, hit := sticky.get(now, stickyKey); hit {
-			if !excluded(exclude, aid) {
-				if m, found := s.idx.Get(aid); found && s.idx.EligibleMeta(m, now) {
-					return aid, true
+		if p, sec, hit := sticky.getPair(now, stickyKey); hit {
+			stickyPrimary, stickySecondary = p, sec
+			if p != "" && !excluded(exclude, p) {
+				if m, found := s.idx.Get(p); found && s.idx.EligibleMeta(m, now) {
+					return p, true
 				}
 			}
-			// 过期/不合格粘性：删除以免反复撞上。
-			sticky.deleteKey(stickyKey)
+			if sec != "" && !excluded(exclude, sec) {
+				if m, found := s.idx.Get(sec); found && s.idx.EligibleMeta(m, now) {
+					// secondary 顶上时提升为 primary，旧 primary 仍可保留为 secondary
+					sticky.put(now, stickyKey, sec)
+					return sec, true
+				}
+			}
 		}
 	}
 
@@ -119,7 +126,11 @@ func (s *Selector) PickExcluding(now int64, stickyKey string, exclude map[string
 		return "", false
 	}
 	if stickyKey != "" {
+		// 新选号写入 primary；若已有不同旧主号，sticky.put 会自动降为 secondary
 		sticky.put(now, stickyKey, id)
+		// 若 primary 失效后直接选到新号，且存在旧 secondary 与新号不同，保持原 secondary
+		_ = stickyPrimary
+		_ = stickySecondary
 	}
 	return id, true
 }
@@ -134,6 +145,30 @@ func (s *Selector) BindSticky(stickyKey, accountID string) {
 	sticky := s.sticky
 	s.mu.RUnlock()
 	sticky.put(now, stickyKey, accountID)
+}
+
+// BindStickySecondary 设置会话次选号（主号不可用时优先）。
+func (s *Selector) BindStickySecondary(stickyKey, accountID string) {
+	if s == nil {
+		return
+	}
+	now := time.Now().Unix()
+	s.mu.RLock()
+	sticky := s.sticky
+	s.mu.RUnlock()
+	sticky.putSecondary(now, stickyKey, accountID)
+}
+
+// StickyPair 返回会话 primary/secondary（测试/运维）。
+func (s *Selector) StickyPair(stickyKey string) (primary, secondary string, ok bool) {
+	if s == nil {
+		return "", "", false
+	}
+	now := time.Now().Unix()
+	s.mu.RLock()
+	sticky := s.sticky
+	s.mu.RUnlock()
+	return sticky.getPair(now, stickyKey)
 }
 
 // ClearStickyKey 删除一条粘性绑定（例如键范围失败后）。

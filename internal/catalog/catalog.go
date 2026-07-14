@@ -1,9 +1,9 @@
 package catalog
 
 import (
-	"os"
 	"database/sql"
 	"fmt"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -1132,6 +1132,10 @@ LIMIT ?`
 			rate := float64(s.SuccessCount) / float64(total)
 			s.SuccessRate = &rate
 		}
+		if s.CooldownUntil > now {
+			s.CooldownRemainingSec = s.CooldownUntil - now
+		}
+		s.StatusReason = accountStatusReason(s, now)
 		out = append(out, s)
 	}
 	if err := rows.Err(); err != nil {
@@ -1201,7 +1205,6 @@ func (c *Catalog) CountAccountsFiltered(filter AccountListFilter) (int, error) {
 	}
 	return n, nil
 }
-
 
 // Stats 返回冷存储的聚合计数。
 func (c *Catalog) Stats() (CatalogStats, error) {
@@ -1303,4 +1306,55 @@ func nullInt64Ptr(n sql.NullInt64) *int64 {
 	}
 	v := n.Int64
 	return &v
+}
+
+func accountStatusReason(s AccountSummary, now int64) string {
+	if s.ManualDisabled {
+		return "手动禁用"
+	}
+	if !s.Enabled {
+		return "已禁用"
+	}
+	switch s.Lifecycle {
+	case LifecycleQuarantined:
+		if s.LastError != "" {
+			return "隔离: " + s.LastError
+		}
+		return "隔离"
+	case LifecyclePurged:
+		return "已清理"
+	}
+	if s.CooldownUntil > now {
+		left := s.CooldownUntil - now
+		msg := "冷却中"
+		if s.LastError != "" {
+			msg += " (" + s.LastError + ")"
+		}
+		msg += "; 剩余约 "
+		switch {
+		case left < 60:
+			msg += fmt.Sprintf("%ds", left)
+		case left < 3600:
+			msg += fmt.Sprintf("%dm", (left+59)/60)
+		default:
+			msg += fmt.Sprintf("%dh", (left+3599)/3600)
+		}
+		return msg
+	}
+	if !s.HasAccess && !s.HasRefresh {
+		return "无令牌"
+	}
+	if s.Billing != nil && s.Billing.ProbeOK != nil && !*s.Billing.ProbeOK {
+		if s.Billing.ProbeError != "" {
+			return "测活失败: " + s.Billing.ProbeError
+		}
+		return "测活失败"
+	}
+	if s.LastError != "" && !s.Alive {
+		return s.LastError
+	}
+	if s.Alive {
+		return "可用"
+	}
+	return "不可用"
 }

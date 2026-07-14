@@ -31,6 +31,7 @@ type Lease struct {
 	ProxyURL    string
 	ProxyMode   string
 	StickyKey   string
+	Model       string
 	Attempt     int
 }
 
@@ -74,6 +75,10 @@ type Manager struct {
 
 	mu  sync.RWMutex
 	cfg Config
+
+	// modelCool: accountID -> model -> unix until（进程内模型级冷却，避免单模型 429 连坐整号）
+	modelMu   sync.Mutex
+	modelCool map[string]map[string]int64
 }
 
 // New 构造 Manager。cat、idx、sel 均不可为 nil。
@@ -111,7 +116,7 @@ func (m *Manager) ApplyConfig(cfg Config) {
 }
 
 // Acquire 选号（最多 MaxAttempts 次切换）、加载令牌并增加 inflight。
-func (m *Manager) Acquire(ctx context.Context, stickyKey string) (Lease, error) {
+func (m *Manager) Acquire(ctx context.Context, stickyKey, model string) (Lease, error) {
 	if m == nil {
 		return Lease{}, fmt.Errorf("%w: nil manager", ErrInvalidInput)
 	}
@@ -122,7 +127,7 @@ func (m *Manager) Acquire(ctx context.Context, stickyKey string) (Lease, error) 
 		if err := ctx.Err(); err != nil {
 			return Lease{}, err
 		}
-		lease, err := m.acquireOnce(ctx, stickyKey, tried, attempt)
+		lease, err := m.acquireOnce(ctx, stickyKey, model, tried, attempt)
 		if err == nil {
 			return lease, nil
 		}
@@ -141,7 +146,7 @@ func (m *Manager) Acquire(ctx context.Context, stickyKey string) (Lease, error) 
 
 // AcquireAttempt 执行单次 pick→get→inflight 周期，永不返回 tried 中的 id。
 // 软失败（不合格/不在热集）时，若 tried 非 nil 则写入失败 id。
-func (m *Manager) AcquireAttempt(ctx context.Context, stickyKey string, tried map[string]struct{}) (Lease, error) {
+func (m *Manager) AcquireAttempt(ctx context.Context, stickyKey, model string, tried map[string]struct{}) (Lease, error) {
 	if m == nil {
 		return Lease{}, fmt.Errorf("%w: nil manager", ErrInvalidInput)
 	}
@@ -151,10 +156,10 @@ func (m *Manager) AcquireAttempt(ctx context.Context, stickyKey string, tried ma
 	if tried == nil {
 		tried = make(map[string]struct{})
 	}
-	return m.acquireOnce(ctx, stickyKey, tried, 1)
+	return m.acquireOnce(ctx, stickyKey, model, tried, 1)
 }
 
-func (m *Manager) acquireOnce(ctx context.Context, stickyKey string, tried map[string]struct{}, attempt int) (Lease, error) {
+func (m *Manager) acquireOnce(ctx context.Context, stickyKey, model string, tried map[string]struct{}, attempt int) (Lease, error) {
 	_ = ctx // 预留给未来可取消的 catalog 操作
 	now := time.Now().Unix()
 
@@ -182,6 +187,9 @@ func (m *Manager) acquireOnce(ctx context.Context, stickyKey string, tried map[s
 	if !accountUsable(acct, now) {
 		return Lease{}, fmt.Errorf("lease: account %s not usable after pick", id)
 	}
+	if model != "" && m.modelCooldownActive(id, model, now) {
+		return Lease{}, fmt.Errorf("lease: account %s model %s cooling", id, model)
+	}
 
 	if err := m.idx.AddInflight(id); err != nil {
 		// 竞态：pick 与 acquire 之间已从热集 demote。
@@ -199,6 +207,7 @@ func (m *Manager) acquireOnce(ctx context.Context, stickyKey string, tried map[s
 		ProxyURL:    acct.ProxyURL,
 		ProxyMode:   acct.ProxyMode,
 		StickyKey:   stickyKey,
+		Model:       model,
 		Attempt:     attempt,
 	}, nil
 }
@@ -338,8 +347,14 @@ func (m *Manager) releaseFailure(lease Lease, result Result, now int64) error {
 	if applyCooldown {
 		coolSec := m.cooldownSeconds(code, result.RetryAfter, fc)
 		until := now + coolSec
-		patch.CooldownUntil = &until
-		_ = m.idx.SetCooldown(lease.AccountID, until)
+		// 429 + 有 model：优先模型级冷却，不连坐整号（除非显式无 model）
+		if code == 429 && strings.TrimSpace(lease.Model) != "" {
+			m.setModelCooldown(lease.AccountID, lease.Model, until)
+			// 不写账号级 cooldown_until；仍记 failure/last_error
+		} else {
+			patch.CooldownUntil = &until
+			_ = m.idx.SetCooldown(lease.AccountID, until)
+		}
 
 		if code == 401 {
 			cu := cur.ConsecutiveUnauthorized + 1
@@ -494,4 +509,55 @@ func (m *Manager) cooldownSeconds(statusCode int, retryAfter time.Duration, fail
 		}
 	}
 	return sec
+}
+
+func (m *Manager) setModelCooldown(accountID, model string, until int64) {
+	if m == nil || accountID == "" || model == "" || until <= 0 {
+		return
+	}
+	m.modelMu.Lock()
+	defer m.modelMu.Unlock()
+	if m.modelCool == nil {
+		m.modelCool = make(map[string]map[string]int64)
+	}
+	mm := m.modelCool[accountID]
+	if mm == nil {
+		mm = make(map[string]int64)
+		m.modelCool[accountID] = mm
+	}
+	mm[model] = until
+}
+
+func (m *Manager) modelCooldownActive(accountID, model string, now int64) bool {
+	if m == nil || accountID == "" || model == "" {
+		return false
+	}
+	m.modelMu.Lock()
+	defer m.modelMu.Unlock()
+	mm := m.modelCool[accountID]
+	if mm == nil {
+		return false
+	}
+	until := mm[model]
+	if until <= now {
+		delete(mm, model)
+		if len(mm) == 0 {
+			delete(m.modelCool, accountID)
+		}
+		return false
+	}
+	return true
+}
+
+// ModelCooldownUntil 返回模型冷却截止（测试/运维）。
+func (m *Manager) ModelCooldownUntil(accountID, model string) int64 {
+	if m == nil {
+		return 0
+	}
+	m.modelMu.Lock()
+	defer m.modelMu.Unlock()
+	if m.modelCool == nil {
+		return 0
+	}
+	return m.modelCool[accountID][model]
 }

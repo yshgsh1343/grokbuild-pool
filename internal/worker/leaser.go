@@ -35,11 +35,11 @@ func newStoreLeaser(st store.AccountStore, idx *hot.Index, sel *selector.Selecto
 	return &storeLeaser{store: st, idx: idx, sel: sel, state: state, maxInflight: maxInflight, maxAttempts: maxAttempts}
 }
 
-func (m *storeLeaser) Acquire(ctx context.Context, stickyKey string) (lease.Lease, error) {
+func (m *storeLeaser) Acquire(ctx context.Context, stickyKey, model string) (lease.Lease, error) {
 	tried := make(map[string]struct{}, m.maxAttempts)
 	var last error
 	for attempt := 1; attempt <= m.maxAttempts; attempt++ {
-		l, err := m.AcquireAttempt(ctx, stickyKey, tried)
+		l, err := m.AcquireAttempt(ctx, stickyKey, model, tried)
 		if err == nil {
 			return l, nil
 		}
@@ -54,7 +54,7 @@ func (m *storeLeaser) Acquire(ctx context.Context, stickyKey string) (lease.Leas
 	return lease.Lease{}, last
 }
 
-func (m *storeLeaser) AcquireAttempt(ctx context.Context, stickyKey string, tried map[string]struct{}) (lease.Lease, error) {
+func (m *storeLeaser) AcquireAttempt(ctx context.Context, stickyKey, model string, tried map[string]struct{}) (lease.Lease, error) {
 	if err := ctx.Err(); err != nil {
 		return lease.Lease{}, err
 	}
@@ -109,6 +109,7 @@ func (m *storeLeaser) AcquireAttempt(ctx context.Context, stickyKey string, trie
 		ProxyURL:    acc.ProxyURL,
 		ProxyMode:   acc.ProxyMode,
 		StickyKey:   stickyKey,
+		Model:       model,
 		Attempt:     len(tried),
 	}, nil
 }

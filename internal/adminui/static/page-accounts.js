@@ -151,15 +151,23 @@ function accountStatusBadges(a) {
   if (a.enabled) parts.push('<span class="badge badge-life">启用</span>');
   else parts.push('<span class="badge off">禁用</span>');
   if (a.manual_disabled) parts.push('<span class="badge off">手动关</span>');
-  if (a.cooldown_until && Number(a.cooldown_until) > now) {
-    parts.push('<span class="badge badge-cool">冷却 ' + esc(fmtCooldown(a.cooldown_until)) + "</span>");
+  var coolLeft = Number(a.cooldown_remaining_sec || 0);
+  if ((!coolLeft || coolLeft <= 0) && a.cooldown_until && Number(a.cooldown_until) > now) {
+    coolLeft = Number(a.cooldown_until) - now;
+  }
+  if (coolLeft > 0) {
+    parts.push('<span class="badge badge-cool">冷却剩余 ' + esc(fmtCooldown(now + coolLeft)) + "</span>");
   }
   if (!a.has_access && !a.has_refresh) {
     parts.push('<span class="badge off">无令牌</span>');
   } else if (!a.has_access) {
     parts.push('<span class="badge badge-soft">无 access</span>');
   }
-  return '<div class="acc-status-cell">' + parts.join(" ") + "</div>";
+  var reason = a.status_reason || a.last_error || "";
+  var reasonHtml = reason
+    ? '<div class="muted acc-status-reason" title="' + esc(reason) + '">' + esc(reason) + "</div>"
+    : "";
+  return '<div class="acc-status-cell">' + parts.join(" ") + reasonHtml + "</div>";
 }
 
 function formatSuccessRate(a) {
