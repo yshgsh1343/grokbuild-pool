@@ -29,7 +29,7 @@ const (
 // 默认值。
 const (
 	DefaultWorkers     = 4
-	MaxWorkers         = 16
+	MaxWorkers         = 128
 	DefaultBatch       = 500
 	ProgressEvery      = 5000
 	DefaultMaxRSSBytes = 5 << 30 // 5 GiB
@@ -541,10 +541,10 @@ func normalizeConfig(cfg Config) Config {
 	if cfg.Workers <= 0 {
 		cfg.Workers = DefaultWorkers
 	}
-	// 小机器限制 worker（4C 已有 max 16；再按 GOMAXPROCS*4 封顶）。
+	// worker 上限 MaxWorkers；再按 GOMAXPROCS*4 软封顶（可被配置抬高到 MaxWorkers）。
 	cap := MaxWorkers
 	if n := runtime.NumCPU() * 4; n > 0 && n < cap {
-		// 按规格 4C 也允许到 16；保留 MaxWorkers。
+		// 保留 MaxWorkers 硬顶。
 		_ = n
 	}
 	if cfg.Workers > MaxWorkers {

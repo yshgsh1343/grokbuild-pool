@@ -20,14 +20,34 @@ func (h *Handlers) ListImportJobs(w http.ResponseWriter, r *http.Request) {
 	if list == nil {
 		list = []importjobs.Job{}
 	}
+	limits := map[string]any{
+		"enabled":                  h.importEnabled(),
+		"max_upload_bytes":         h.effectiveImportMaxUploadBytes(),
+		"max_entries":              h.effectiveImportMaxEntries(),
+		"sso_converter_configured": h.ssoConverterConfigured(),
+	}
+	// 回传当前 Manager 生效中的热参数，避免 UI 只见 settings 不知运行时
+	if h.ImportJobs != nil {
+		opts := h.ImportJobs.OptionsSnapshot()
+		limits["max_concurrent_jobs"] = opts.MaxConcurrentJobs
+		limits["workers"] = opts.Workers
+		limits["max_ndjson_line_bytes"] = opts.MaxNDJSONLineBytes
+		limits["max_sso_value_bytes"] = opts.MaxSSOValueBytes
+		limits["job_timeout_sec"] = int(opts.JobTimeout.Seconds())
+		limits["staging_stale_after_sec"] = int(opts.StagingStaleAfter.Seconds())
+		limits["allow_server_path"] = opts.AllowServerPath
+	}
+	if h.Settings != nil {
+		s := h.Settings.Snapshot()
+		limits["import_workers"] = s.ImportWorkers
+		limits["import_sso_workers"] = s.ImportSSOWorkers
+		limits["import_sso_max_batch"] = s.ImportSSOMaxBatch
+		limits["import_canary_hot_size"] = s.ImportCanaryHotSize
+		limits["import_canary_hold_sec"] = s.ImportCanaryHoldSec
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"jobs": list,
-		"limits": map[string]any{
-			"enabled":                  h.importEnabled(),
-			"max_upload_bytes":         h.effectiveImportMaxUploadBytes(),
-			"max_entries":              h.effectiveImportMaxEntries(),
-			"sso_converter_configured": h.ssoConverterConfigured(),
-		},
+		"jobs":   list,
+		"limits": limits,
 	})
 }
 

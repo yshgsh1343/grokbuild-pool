@@ -542,27 +542,28 @@ func (c *SettingsController) Apply(in RuntimeSettings) (RuntimeSettings, error) 
 	in.AdminKey = ""
 	in.ImportSSOAPIKey = ""
 
-	// 导入数值边界：0=不限体积；>0 时硬顶 2GiB
+	// 导入数值边界：0=不限体积；>0 时硬顶 2GiB。
+	// 条目/并发/workers 给高上限，避免管理台「改了被钳回」像写死。
 	if in.ImportMaxUploadBytes < 0 {
 		in.ImportMaxUploadBytes = 0
 	}
 	if in.ImportMaxUploadBytes > 2<<30 {
 		in.ImportMaxUploadBytes = 2 << 30
 	}
-	if in.ImportMaxEntries > 100_000 {
-		in.ImportMaxEntries = 100_000
+	if in.ImportMaxEntries > 2_000_000 {
+		in.ImportMaxEntries = 2_000_000
 	}
-	if in.ImportMaxConcurrentJobs > 8 {
-		in.ImportMaxConcurrentJobs = 8
+	if in.ImportMaxConcurrentJobs > 64 {
+		in.ImportMaxConcurrentJobs = 64
 	}
-	if in.ImportWorkers > 16 {
-		in.ImportWorkers = 16
+	if in.ImportWorkers > 128 {
+		in.ImportWorkers = 128
 	}
-	if in.ImportSSOMaxBatch > 100 {
-		in.ImportSSOMaxBatch = 100
+	if in.ImportSSOMaxBatch > 500 {
+		in.ImportSSOMaxBatch = 500
 	}
-	if in.ImportSSOWorkers > 16 {
-		in.ImportSSOWorkers = 16
+	if in.ImportSSOWorkers > 128 {
+		in.ImportSSOWorkers = 128
 	}
 
 	// 重启提示：仅真正无法热更的绑定项（端口 / 数据路径）。

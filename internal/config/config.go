@@ -556,8 +556,8 @@ func (c Config) Validate() error {
 		c.Imports.MaxRequestBytes < c.Imports.MaxUploadBytes+DefaultImportRequestOverhead {
 		return fmt.Errorf("config: imports.max_request_bytes must exceed max_upload_bytes by at least 1 MiB when both are set")
 	}
-	if c.Imports.MaxEntries < 1 || c.Imports.MaxEntries > 100_000 {
-		return fmt.Errorf("config: imports.max_entries must be between 1 and 100000")
+	if c.Imports.MaxEntries < 1 || c.Imports.MaxEntries > 2_000_000 {
+		return fmt.Errorf("config: imports.max_entries must be between 1 and 2000000")
 	}
 	if c.Imports.MaxNDJSONLineBytes < 4<<10 || c.Imports.MaxNDJSONLineBytes > 4<<20 {
 		return fmt.Errorf("config: imports.max_ndjson_line_bytes must be between 4 KiB and 4 MiB")
@@ -565,8 +565,8 @@ func (c Config) Validate() error {
 	if c.Imports.MaxSSOValueBytes < 1<<10 || c.Imports.MaxSSOValueBytes > 64<<10 {
 		return fmt.Errorf("config: imports.max_sso_value_bytes must be between 1 KiB and 64 KiB")
 	}
-	if c.Imports.MaxConcurrentJobs < 1 || c.Imports.MaxConcurrentJobs > 8 {
-		return fmt.Errorf("config: imports.max_concurrent_jobs must be between 1 and 8")
+	if c.Imports.MaxConcurrentJobs < 1 || c.Imports.MaxConcurrentJobs > 64 {
+		return fmt.Errorf("config: imports.max_concurrent_jobs must be between 1 and 64")
 	}
 	if c.Imports.JobTimeoutSec < 60 || c.Imports.JobTimeoutSec > 24*60*60 {
 		return fmt.Errorf("config: imports.job_timeout_sec must be between 60 and 86400")
@@ -574,8 +574,8 @@ func (c Config) Validate() error {
 	if c.Imports.StagingStaleAfterSec < c.Imports.JobTimeoutSec {
 		return fmt.Errorf("config: imports.staging_stale_after_sec must be >= job_timeout_sec")
 	}
-	if c.Imports.SSOConverter.MaxBatch < 1 || c.Imports.SSOConverter.MaxBatch > 100 {
-		return fmt.Errorf("config: imports.sso_converter.max_batch must be between 1 and 100")
+	if c.Imports.SSOConverter.MaxBatch < 1 || c.Imports.SSOConverter.MaxBatch > 500 {
+		return fmt.Errorf("config: imports.sso_converter.max_batch must be between 1 and 500")
 	}
 	if c.Imports.SSOConverter.TimeoutSec < 1 || c.Imports.SSOConverter.TimeoutSec > 300 {
 		return fmt.Errorf("config: imports.sso_converter.timeout_sec must be between 1 and 300")

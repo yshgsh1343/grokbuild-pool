@@ -86,16 +86,16 @@ func (c *LocalConverter) Configure(workers, flowConcurrency int, flowGap time.Du
 		return
 	}
 	if workers > 0 {
-		if workers > 16 {
-			workers = 16
+		if workers > 128 {
+			workers = 128
 		}
 		c.Workers = workers
 	}
 	if flowConcurrency <= 0 {
 		flowConcurrency = c.Workers
 	}
-	if flowConcurrency > 16 {
-		flowConcurrency = 16
+	if flowConcurrency > 128 {
+		flowConcurrency = 128
 	}
 	if flowConcurrency < 1 {
 		flowConcurrency = 1
@@ -119,8 +119,8 @@ func (c *LocalConverter) Convert(ctx context.Context, ssoValues []string) ([]Con
 	if workers <= 0 {
 		workers = 4
 	}
-	if workers > 16 {
-		workers = 16
+	if workers > 128 {
+		workers = 128
 	}
 	if c.flowSem == nil {
 		n := c.FlowConcurrency
