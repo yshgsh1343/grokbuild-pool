@@ -48,6 +48,11 @@ type FormState = {
   clear_sticky_on_429: boolean;
   clear_sticky_on_5xx: boolean;
 
+  require_proxy: boolean;
+  proxy_pool_enabled: boolean;
+  proxy_assign_mode: string;
+  import_proxy_url: string;
+
   max_concurrent: number;
   max_body_bytes: number;
   request_timeout_sec: number;
@@ -74,6 +79,7 @@ type FormState = {
   import_job_timeout_sec: number;
   import_staging_stale_after_sec: number;
   import_allow_server_path: boolean;
+  import_server_dir: string;
   import_sso_endpoint: string;
   import_sso_api_key: string;
   import_sso_max_batch: number;
@@ -101,6 +107,7 @@ type FormState = {
 const SECTIONS = [
   { id: "sel", title: "选号 / 热池" },
   { id: "lease", title: "租约 / 冷却" },
+  { id: "proxy", title: "代理池 / 出口" },
   { id: "http", title: "进程 / HTTP" },
   { id: "refresh", title: "Token 刷新" },
   { id: "token", title: "令牌模板" },
@@ -173,6 +180,11 @@ function fromSnapshot(s: SettingsSnapshot): FormState {
     clear_sticky_on_429: !!s.clear_sticky_on_429,
     clear_sticky_on_5xx: !!s.clear_sticky_on_5xx,
 
+    require_proxy: !!s.require_proxy,
+    proxy_pool_enabled: !!s.proxy_pool_enabled,
+    proxy_assign_mode: s.proxy_assign_mode || "hash",
+    import_proxy_url: s.import_proxy_url || "",
+
     max_concurrent: s.max_concurrent ?? 0,
     max_body_bytes: s.max_body_bytes ?? 0,
     request_timeout_sec: s.request_timeout_sec ?? 0,
@@ -199,6 +211,7 @@ function fromSnapshot(s: SettingsSnapshot): FormState {
     import_job_timeout_sec: s.import_job_timeout_sec ?? 0,
     import_staging_stale_after_sec: s.import_staging_stale_after_sec ?? 0,
     import_allow_server_path: !!s.import_allow_server_path,
+    import_server_dir: s.import_server_dir || "",
     import_sso_endpoint: s.import_sso_endpoint || "",
     import_sso_api_key: "",
     import_sso_max_batch: s.import_sso_max_batch ?? 0,
@@ -253,6 +266,11 @@ function toBody(f: FormState): RuntimeSettings {
     clear_sticky_on_429: f.clear_sticky_on_429,
     clear_sticky_on_5xx: f.clear_sticky_on_5xx,
 
+    require_proxy: f.require_proxy,
+    proxy_pool_enabled: f.proxy_pool_enabled,
+    proxy_assign_mode: f.proxy_assign_mode,
+    import_proxy_url: f.import_proxy_url,
+
     max_concurrent: f.max_concurrent,
     max_body_bytes: f.max_body_bytes,
     request_timeout_sec: f.request_timeout_sec,
@@ -279,6 +297,7 @@ function toBody(f: FormState): RuntimeSettings {
     import_job_timeout_sec: f.import_job_timeout_sec,
     import_staging_stale_after_sec: f.import_staging_stale_after_sec,
     import_allow_server_path: f.import_allow_server_path,
+    import_server_dir: f.import_server_dir,
     import_sso_endpoint: f.import_sso_endpoint,
     import_sso_max_batch: f.import_sso_max_batch,
     import_sso_timeout_sec: f.import_sso_timeout_sec,
@@ -434,7 +453,7 @@ export function SettingsPage() {
     <div className="space-y-4">
       <PageHeader
         title="设置"
-        description="手动「保存并应用」后写入；多数项即时热更 · 仅 listen / data_dir / db_path 需重启 · 密钥留空表示不修改"
+        description="手动「保存并应用」后写入；多数项即时热更 · 代理池/require_proxy 可热更 · 仅 listen / data_dir / db_path 需重启 · 密钥留空表示不修改"
         actions={
           <>
             <Button
@@ -551,6 +570,31 @@ export function SettingsPage() {
         {boolField("5xx 清粘性", "clear_sticky_on_5xx")}
       </Section>
 
+      <Section
+        id="proxy"
+        title="代理池 / 出口（Build 防封）"
+        note="节点列表见「代理池」页 / API /admin/proxy-pool；开启后无 proxy 的账号 Acquire 时稳定绑定并写库。require_proxy=开则无代理不可用。"
+      >
+        {boolField("强制要求代理", "require_proxy")}
+        {boolField("启用代理池自动分配", "proxy_pool_enabled")}
+        <div className="space-y-1">
+          <Label>分配模式</Label>
+          <Select
+            value={form.proxy_assign_mode || "hash"}
+            onValueChange={(v) => set("proxy_assign_mode", v)}
+          >
+            <SelectTrigger>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="hash">hash（按账号稳定哈希）</SelectItem>
+              <SelectItem value="least_accounts">least_accounts（最少绑定）</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+        {textField("导入专用代理URL(可选)", "import_proxy_url", "socks5://… 仅导入用")}
+      </Section>
+
       <Section id="http" title="进程限制 / HTTP" note="全局并发、Body、超时立即生效">
         {numField("全局最大并发", "max_concurrent")}
         {numField("最大 Body 字节", "max_body_bytes")}
@@ -575,8 +619,8 @@ export function SettingsPage() {
         </div>
       </Section>
 
-      <Section id="refresh" title="Token 刷新 workers" note="QPS / Skew / Workers 保存后即时生效">
-        {numField("Workers（2–4）", "refresh_workers")}
+      <Section id="refresh" title="Token 刷新 workers" note="QPS / Skew / Workers 保存后即时生效（Workers 只增补不杀在途）">
+        {numField("Workers", "refresh_workers")}
         {numField("Refresh QPS", "refresh_qps", { step: "0.1" })}
         {numField("Skew 秒", "refresh_skew_sec")}
       </Section>
@@ -588,10 +632,14 @@ export function SettingsPage() {
         {boolField("默认无限额度", "token_default_unlimited")}
       </Section>
 
-      <Section id="import" title="导入 / SSO 转换" note="JSON 秒级落库；SSO 需 Device Flow 换票">
+      <Section
+        id="import"
+        title="导入 / SSO 转换"
+        note="保存后即时热更（进行中任务保持旧值，新任务用新值）。参数尽量不写死，仅保留防崩溃上限。"
+      >
         {boolField("启用导入", "import_enabled")}
         {numField("最大上传字节(0=不限)", "import_max_upload_bytes")}
-        {numField("最大条目", "import_max_entries")}
+        {numField("最大条目/任务", "import_max_entries")}
         {numField("并发任务数", "import_max_concurrent_jobs")}
         {numField("解析 workers", "import_workers")}
         {numField("导入 Canary 热池条数(0=全量)", "import_canary_hot_size")}
@@ -601,6 +649,11 @@ export function SettingsPage() {
         {numField("任务超时秒", "import_job_timeout_sec")}
         {numField("Staging 过期秒", "import_staging_stale_after_sec")}
         {boolField("允许服务端路径", "import_allow_server_path")}
+        {textField(
+          "服务端导入根目录",
+          "import_server_dir",
+          "/data/imports 或空=data_dir",
+        )}
         {textField("SSO Endpoint", "import_sso_endpoint", "https://…/v1/convert")}
         {textField(
           "SSO API Key(留空不改)",

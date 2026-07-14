@@ -472,7 +472,7 @@ export function AccountsPage() {
                   />
                 </TableHead>
                 <TableHead>ID</TableHead>
-                <TableHead>Email</TableHead>
+                <TableHead>邮箱</TableHead>
                 <TableHead>状态</TableHead>
                 <TableHead>成功率</TableHead>
                 <TableHead>并发</TableHead>
@@ -506,7 +506,12 @@ export function AccountsPage() {
                       {a.id}
                     </button>
                   </TableCell>
-                  <TableCell className="max-w-[140px] truncate">{a.email || "—"}</TableCell>
+                  <TableCell
+                    className="max-w-[160px] truncate"
+                    title={a.email || a.name || a.id || ""}
+                  >
+                    {displayEmail(a)}
+                  </TableCell>
                   <TableCell>
                     <StatusBadges a={a} />
                   </TableCell>
@@ -626,6 +631,14 @@ export function AccountsPage() {
       </AlertDialog>
     </div>
   );
+}
+
+function displayEmail(a: AccountSummary): string {
+  const e = (a.email && String(a.email).trim()) || "";
+  if (e) return e;
+  const n = (a.name && String(a.name).trim()) || "";
+  if (n) return n;
+  return "—";
 }
 
 function StatusBadges({ a }: { a: AccountSummary }) {

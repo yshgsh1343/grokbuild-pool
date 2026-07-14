@@ -5,6 +5,7 @@ import {
   LogOut,
   Menu,
   Moon,
+  Network,
   Settings,
   Sun,
   Users,
@@ -29,6 +30,7 @@ const navigation = [
   { href: "/dashboard", label: "仪表盘", icon: LayoutDashboard },
   { href: "/accounts", label: "账号", icon: Users },
   { href: "/tokens", label: "Token", icon: KeyRound },
+  { href: "/proxy-pool", label: "代理池", icon: Network },
   { href: "/imports", label: "导入任务", icon: Import },
   { href: "/settings", label: "设置", icon: Settings },
 ] as const;

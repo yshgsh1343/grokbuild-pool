@@ -1,10 +1,11 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { RefreshCw, Upload } from "lucide-react";
+import { FolderOpen, RefreshCw, Upload } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
   Select,
@@ -22,7 +23,12 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { api, ApiError } from "@/shared/api/client";
-import type { ImportJob, ImportJobsResponse } from "@/shared/api/types";
+import type {
+  ImportJob,
+  ImportJobsResponse,
+  ServerDirEntry,
+  ServerDirResponse,
+} from "@/shared/api/types";
 import {
   EmptyState,
   ErrorState,
@@ -61,6 +67,12 @@ export function ImportsPage() {
   const [format, setFormat] = useState("sso");
   const [files, setFiles] = useState<File[]>([]);
   const fileRef = useRef<HTMLInputElement>(null);
+  const [serverPath, setServerPath] = useState("");
+  const [serverRoot, setServerRoot] = useState("");
+  const [serverEntries, setServerEntries] = useState<ServerDirEntry[]>([]);
+  const [serverCurrent, setServerCurrent] = useState("");
+  const [serverErr, setServerErr] = useState<string | null>(null);
+  const [serverLoading, setServerLoading] = useState(false);
 
   const listQ = useQuery({
     queryKey: ["import-jobs"],
@@ -69,6 +81,9 @@ export function ImportsPage() {
 
   const jobs = listQ.data?.jobs ?? [];
   const limits = listQ.data?.limits;
+  const serverEnabled = !!(
+    limits?.allow_server_path || limits?.import_allow_server_path
+  );
   const active = useMemo(
     () => jobs.filter((j) => j.state === "queued" || j.state === "running"),
     [jobs],
@@ -115,6 +130,38 @@ export function ImportsPage() {
     onError: (e: Error) => toast.error(e.message),
   });
 
+  const serverImportM = useMutation({
+    mutationFn: (path: string) =>
+      api("/admin/import/jobs", {
+        method: "POST",
+        body: { format, path },
+      }),
+    onSuccess: () => {
+      toast.success("已创建服务端导入任务");
+      void qc.invalidateQueries({ queryKey: ["import-jobs"] });
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
+  async function loadServerDir(sub = "") {
+    setServerLoading(true);
+    setServerErr(null);
+    try {
+      const q = sub
+        ? `/admin/import/server-dir?path=${encodeURIComponent(sub)}`
+        : "/admin/import/server-dir";
+      const res = await api<ServerDirResponse>(q);
+      setServerRoot(res.root || "");
+      setServerCurrent(res.path || "");
+      setServerEntries(res.entries || []);
+    } catch (e) {
+      setServerEntries([]);
+      setServerErr(e instanceof Error ? e.message : "浏览失败");
+    } finally {
+      setServerLoading(false);
+    }
+  }
+
   const accept =
     format === "json"
       ? ".json,application/json"
@@ -126,7 +173,7 @@ export function ImportsPage() {
     <div className="space-y-4">
       <PageHeader
         title="导入任务"
-        description="JSON 秒级落库；SSO 需 Device Flow 换票，下方显示实时进度"
+        description="本地上传或服务端路径导入；SSO 需 Device Flow 换票，下方显示实时进度"
         actions={
           <Button
             variant="ghost"
@@ -173,10 +220,24 @@ export function ImportsPage() {
         <p className="mt-2 text-xs text-muted-foreground">
           {limits?.enabled === false
             ? "导入已禁用（设置中开启 import_enabled）"
-            : `最多 ${limits?.max_entries ?? 10000} 条`}
+            : `最多 ${limits?.max_entries ?? 10000} 条/任务`}
           {limits?.max_upload_bytes
             ? ` · 单文件上限 ${formatBytes(limits.max_upload_bytes)}`
             : ""}
+          {limits?.max_concurrent_jobs != null
+            ? ` · 并发任务 ${limits.max_concurrent_jobs}`
+            : ""}
+          {limits?.workers != null ? ` · 解析 workers ${limits.workers}` : ""}
+          {limits?.import_sso_workers != null
+            ? ` · SSO workers ${limits.import_sso_workers}`
+            : ""}
+          {serverEnabled
+            ? ` · 服务端导入开${
+                limits?.import_server_dir
+                  ? ` · 根目录 ${limits.import_server_dir}`
+                  : " · 根=data_dir"
+              }`
+            : " · 服务端导入关"}
           {limits?.sso_converter_configured === false && format === "sso"
             ? " · SSO 转换器未配置（将使用内置 Device Flow）"
             : ""}
@@ -200,6 +261,93 @@ export function ImportsPage() {
             {uploadM.isPending ? "上传中…" : "上传并创建任务"}
           </Button>
         </div>
+      </div>
+
+      <div className="rounded-lg border border-border bg-card p-4 space-y-3">
+        <div className="text-sm font-medium">服务端路径导入</div>
+        <p className="text-xs text-muted-foreground">
+          需在设置中开启「允许服务端路径」。可浏览配置根目录下的 .json/.txt/.ndjson，或直接填绝对路径。
+        </p>
+        <div className="flex flex-wrap items-end gap-2">
+          <div className="min-w-[240px] flex-1 space-y-1">
+            <Label htmlFor="imp-server-path">服务端路径（文件或目录）</Label>
+            <Input
+              id="imp-server-path"
+              className="mono"
+              value={serverPath}
+              onChange={(e) => setServerPath(e.target.value)}
+              placeholder="需开启 allow_server_path"
+              disabled={!serverEnabled}
+            />
+          </div>
+          <Button
+            size="sm"
+            variant="secondary"
+            disabled={!serverEnabled || serverLoading}
+            onClick={() => void loadServerDir("")}
+          >
+            <FolderOpen /> 浏览目录
+          </Button>
+          <Button
+            size="sm"
+            disabled={
+              !serverEnabled ||
+              !serverPath.trim() ||
+              serverImportM.isPending ||
+              limits?.enabled === false
+            }
+            onClick={() => {
+              const path = serverPath.trim();
+              if (!path) {
+                toast.warning("请填写服务端文件或目录路径");
+                return;
+              }
+              serverImportM.mutate(path);
+            }}
+          >
+            {serverImportM.isPending ? "提交中…" : "从服务端导入"}
+          </Button>
+        </div>
+        {serverErr ? (
+          <div className="rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs text-destructive">
+            {serverErr}
+          </div>
+        ) : null}
+        {serverLoading ? (
+          <p className="text-xs text-muted-foreground">加载目录…</p>
+        ) : serverEntries.length > 0 ? (
+          <div className="text-xs">
+            <div className="mb-1 text-muted-foreground mono">
+              当前: {serverCurrent}
+              {serverRoot ? ` · 根: ${serverRoot}` : ""}
+            </div>
+            <ul className="max-h-40 space-y-1 overflow-auto">
+              {serverEntries.map((e) => (
+                <li key={e.path}>
+                  <button
+                    type="button"
+                    className="rounded-md px-2 py-1 text-left hover:bg-secondary/60 mono"
+                    onClick={() => {
+                      if (e.is_dir) {
+                        let rel = e.path;
+                        if (serverRoot && e.path.startsWith(serverRoot)) {
+                          rel = e.path.slice(serverRoot.length).replace(/^[/\\]+/, "");
+                        }
+                        void loadServerDir(rel);
+                      } else {
+                        setServerPath(e.path);
+                      }
+                    }}
+                  >
+                    {e.is_dir ? "📁 " : "📄 "}
+                    {e.name}
+                    {!e.is_dir && e.size != null ? ` · ${formatBytes(e.size)}` : ""}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </div>
+        ) : null}
       </div>
 
       {active.length > 0 ? (

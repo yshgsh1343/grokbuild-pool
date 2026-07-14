@@ -170,7 +170,35 @@ export type ImportJobsResponse = {
     max_upload_bytes?: number;
     max_entries?: number;
     sso_converter_configured?: boolean;
+    max_concurrent_jobs?: number;
+    workers?: number;
+    max_ndjson_line_bytes?: number;
+    max_sso_value_bytes?: number;
+    job_timeout_sec?: number;
+    staging_stale_after_sec?: number;
+    allow_server_path?: boolean;
+    import_allow_server_path?: boolean;
+    import_server_dir?: string;
+    import_workers?: number;
+    import_sso_workers?: number;
+    import_sso_max_batch?: number;
+    import_canary_hot_size?: number;
+    import_canary_hold_sec?: number;
   };
+};
+
+export type ServerDirEntry = {
+  name: string;
+  path: string;
+  is_dir?: boolean;
+  size?: number;
+};
+
+export type ServerDirResponse = {
+  root?: string;
+  path?: string;
+  entries?: ServerDirEntry[];
+  note?: string;
 };
 
 export type RuntimeSettings = {
@@ -201,6 +229,12 @@ export type RuntimeSettings = {
   clear_sticky_on_429?: boolean;
   clear_sticky_on_5xx?: boolean;
 
+  // proxy pool / antiban egress
+  require_proxy?: boolean;
+  proxy_pool_enabled?: boolean;
+  proxy_assign_mode?: string; // hash | least_accounts
+  import_proxy_url?: string;
+
   max_concurrent?: number;
   max_body_bytes?: number;
   request_timeout_sec?: number;
@@ -224,6 +258,7 @@ export type RuntimeSettings = {
   import_job_timeout_sec?: number;
   import_staging_stale_after_sec?: number;
   import_allow_server_path?: boolean;
+  import_server_dir?: string;
   import_sso_endpoint?: string;
   import_sso_api_key_set?: boolean;
   import_sso_api_key?: string;
@@ -266,4 +301,35 @@ export type BatchResult = {
   deleted?: number;
   ids_ok?: string[];
   errors?: { id?: string; error?: string }[];
+};
+
+export type ProxyNode = {
+  id?: string;
+  url: string;
+  enabled?: boolean;
+  weight?: number;
+  fail_count?: number;
+  cooldown_until?: number;
+  last_error?: string;
+  assigned_accounts?: number;
+};
+
+export type ProxyPoolResponse = {
+  path?: string;
+  enabled?: boolean;
+  require_proxy?: boolean;
+  assign_mode?: string;
+  healthy?: number;
+  nodes?: ProxyNode[];
+  note?: string;
+};
+
+export type ProxyPoolAssignResponse = {
+  ok?: boolean;
+  assigned?: number;
+  skipped?: number;
+  failed?: number;
+  dry_run?: boolean;
+  mode?: string;
+  healthy?: number;
 };
