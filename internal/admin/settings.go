@@ -17,7 +17,7 @@ import (
 )
 
 // RuntimeSettings 管理台可编辑的全部运行参数。
-// 能热更的即时生效；需重启的字段仍持久化到 settings.json 供下次启动/运维参考。
+// 能热更的即时生效；仅 listen/data_dir/db_path 等绑定项需重启，其余均持久化并可热更。
 type RuntimeSettings struct {
 	// —— 选号 / 热池 ——
 	SelectorStrategy      string  `json:"selector_strategy"`
@@ -136,6 +136,12 @@ type SettingsController struct {
 	ApplyImport func(in RuntimeSettings) error
 	// ApplyAnthropic 可选：热更新 Anthropic 别名/开关
 	ApplyAnthropic func(in RuntimeSettings)
+	// ApplyUpstream 可选：热更新上游 base_url（直连客户端 + 出站工厂缓存）
+	ApplyUpstream func(in RuntimeSettings) error
+	// ApplyOAuth 可选：热更新 oauth refresh_url / client_id
+	ApplyOAuth func(in RuntimeSettings) error
+	// ApplyLogging 可选：热更新日志级别
+	ApplyLogging func(level string)
 	// storedAPIKey / storedAdminKey 仅内存持有明文（GET 不回传）
 	storedAPIKey   string
 	storedAdminKey string
@@ -472,7 +478,8 @@ func (c *SettingsController) Apply(in RuntimeSettings) (RuntimeSettings, error) 
 		in.ImportSSOWorkers = 16
 	}
 
-	// 重启提示：端口/数据路径/upstream 切换
+	// 重启提示：仅真正无法热更的绑定项（端口 / 数据路径）。
+	// upstream / oauth / refresh_workers / hot_size 均已支持保存后即时热更。
 	var restart []string
 	if pi.Listen != "" && in.Listen != "" && in.Listen != pi.Listen {
 		restart = append(restart, "listen")
@@ -482,14 +489,6 @@ func (c *SettingsController) Apply(in RuntimeSettings) (RuntimeSettings, error) 
 	}
 	if pi.DBPath != "" && in.DBPath != "" && in.DBPath != pi.DBPath {
 		restart = append(restart, "db_path")
-	}
-	if in.UpstreamBaseURL != pi.UpstreamBaseURL {
-		restart = append(restart, "upstream_base_url")
-	}
-	// refresh_workers 持久化但运行时无法完整热更（worker 数启动固定）
-	// hot_size 已支持 Resize + ReloadHot 即时重建热集
-	if in.RefreshWorkers != prev.RefreshWorkers {
-		restart = append(restart, "refresh_workers")
 	}
 	if len(restart) > 0 {
 		in.RestartHint = "以下字段已保存，但需手动重启进程后才完全生效（服务不会自动重启）: " + strings.Join(restart, ", ")
@@ -576,7 +575,7 @@ func (c *SettingsController) Apply(in RuntimeSettings) (RuntimeSettings, error) 
 		sc.MaxInflightPerAccount = in.MaxInflightPerAccount
 		c.Selector.ApplyConfig(sc)
 	}
-	// 即时生效：刷新 QPS/Skew
+	// 即时生效：刷新 QPS/Skew/Workers（Workers 仅可增补，不杀在途 worker）
 	if c.Refresh != nil {
 		rc := c.Refresh.Config()
 		rc.Workers = in.RefreshWorkers
@@ -593,6 +592,22 @@ func (c *SettingsController) Apply(in RuntimeSettings) (RuntimeSettings, error) 
 	}
 	if c.SetRequestTimeout != nil {
 		c.SetRequestTimeout(time.Duration(in.RequestTimeoutSec) * time.Second)
+	}
+	// 日志级别
+	if c.ApplyLogging != nil && strings.TrimSpace(in.LoggingLevel) != "" {
+		c.ApplyLogging(in.LoggingLevel)
+	}
+	// 上游 base_url
+	if c.ApplyUpstream != nil {
+		if err := c.ApplyUpstream(in); err != nil {
+			return in, err
+		}
+	}
+	// OAuth refresh_url / client_id
+	if c.ApplyOAuth != nil {
+		if err := c.ApplyOAuth(in); err != nil {
+			return in, err
+		}
 	}
 	// 导入 + Anthropic
 	if c.ApplyAnthropic != nil {

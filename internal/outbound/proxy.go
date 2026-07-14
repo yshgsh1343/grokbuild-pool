@@ -34,6 +34,30 @@ func NewFactory(base upstream.Config) *Factory {
 	}
 }
 
+// ApplyBase 热更新上游默认配置（base_url 等）并清空客户端缓存，
+// 使后续请求按新 base 重建连接池。
+func (f *Factory) ApplyBase(base upstream.Config) {
+	if f == nil {
+		return
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.Base = base
+	f.cache = make(map[string]*upstream.Client)
+	// lastProxyByAccount 仅记录代理亲和，可保留
+}
+
+// UpdateBaseURL 仅改 base_url 并清空缓存；保留其余 Base 字段。
+func (f *Factory) UpdateBaseURL(baseURL string) {
+	if f == nil {
+		return
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.Base.BaseURL = baseURL
+	f.cache = make(map[string]*upstream.Client)
+}
+
 // cacheKey 生成缓存键：无 account 时仅用 proxy；有 account 时 accountID\x00proxy。
 func cacheKey(accountID, proxyURL string) string {
 	proxyURL = strings.TrimSpace(proxyURL)

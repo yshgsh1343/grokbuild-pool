@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/yshgsh1343/grokbuild2api/internal/catalog"
@@ -47,7 +48,9 @@ type HTTPRefreshConfig struct {
 // HTTPRefreshClient 通过可配置 token URL 执行 OAuth refresh_token 授权。
 // 亦称 XaiOAuth（类型别名）：默认文档端点为 xAI 风格，但**默认不会**对公网发请求——
 // 须由 pool-proxy 在 POOL_OAUTH_ENABLED=1 且 STATUS UNLOCK_M12 允许时显式装配。
+// cfg 可经 ApplyConfig 热更。
 type HTTPRefreshClient struct {
+	mu  sync.RWMutex
 	cfg HTTPRefreshConfig
 }
 
@@ -67,6 +70,30 @@ func NewXaiOAuth(refreshURL, clientID string) *HTTPRefreshClient {
 	})
 }
 
+// ApplyConfig 热更新 token URL / client_id（保留已注入的 HTTPClient）。
+func (c *HTTPRefreshClient) ApplyConfig(cfg HTTPRefreshConfig) {
+	if c == nil {
+		return
+	}
+	cfg = cfg.normalize()
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if cfg.HTTPClient == nil {
+		cfg.HTTPClient = c.cfg.HTTPClient
+	}
+	c.cfg = cfg
+}
+
+// Config 返回当前配置副本。
+func (c *HTTPRefreshClient) Config() HTTPRefreshConfig {
+	if c == nil {
+		return HTTPRefreshConfig{}
+	}
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.cfg
+}
+
 func (c HTTPRefreshConfig) normalize() HTTPRefreshConfig {
 	if strings.TrimSpace(c.RefreshURL) == "" {
 		c.RefreshURL = DefaultXAITokenURL
@@ -78,12 +105,16 @@ func (c HTTPRefreshConfig) normalize() HTTPRefreshConfig {
 }
 
 func (c *HTTPRefreshClient) http() *http.Client {
-	if c != nil && c.cfg.HTTPClient != nil {
-		return c.cfg.HTTPClient
+	if c == nil {
+		return &http.Client{Timeout: DefaultHTTPTimeout}
+	}
+	cfg := c.Config()
+	if cfg.HTTPClient != nil {
+		return cfg.HTTPClient
 	}
 	to := DefaultHTTPTimeout
-	if c != nil && c.cfg.Timeout > 0 {
-		to = c.cfg.Timeout
+	if cfg.Timeout > 0 {
+		to = cfg.Timeout
 	}
 	return &http.Client{Timeout: to}
 }
@@ -92,7 +123,7 @@ func (c *HTTPRefreshClient) refreshURL() string {
 	if c == nil {
 		return DefaultXAITokenURL
 	}
-	u := strings.TrimSpace(c.cfg.RefreshURL)
+	u := strings.TrimSpace(c.Config().RefreshURL)
 	if u == "" {
 		return DefaultXAITokenURL
 	}
@@ -103,7 +134,7 @@ func (c *HTTPRefreshClient) clientID() string {
 	if c == nil {
 		return ""
 	}
-	return strings.TrimSpace(c.cfg.ClientID)
+	return strings.TrimSpace(c.Config().ClientID)
 }
 
 // tokenResponse 解析 OAuth token 端点 JSON。

@@ -36,11 +36,13 @@ type Service struct {
 	refreshFail atomic.Int64
 	ensureHit   atomic.Int64 // 已新鲜而短路
 
-	mu      sync.Mutex
-	running bool
-	stop    context.CancelFunc
-	jobs    chan string
-	wg      sync.WaitGroup
+	mu            sync.Mutex
+	running       bool
+	stop          context.CancelFunc
+	workerCtx     context.Context // Start 时的 worker 根 context，供增补 worker
+	jobs          chan string
+	wg            sync.WaitGroup
+	activeWorkers int // 当前已启动 worker 数（可 ≥ cfg.Workers 若曾增补后配置下调）
 }
 
 // New 构造 refresh Service。cat 与 oauth 不可为 nil。
@@ -69,14 +71,16 @@ func New(cat *catalog.Catalog, oauth OAuthClient, cfg Config, fail FailurePolicy
 	}
 }
 
-// Config 返回当前配置。
-// ApplyConfig 热更新 QPS/Skew 等（已启动的 worker 数量不变）。
+// ApplyConfig 热更新 QPS/Skew/Workers 等。
+// Workers 在已运行时会增补新 worker（仅可增加，不缩减在途 worker，
+// 避免中断进行中的 OAuth；目标数低于当前时仅更新配置，下次 Start 生效）。
 func (s *Service) ApplyConfig(cfg Config) {
 	if s == nil {
 		return
 	}
 	cfg = cfg.normalize()
 	s.mu.Lock()
+	prevWorkers := s.cfg.Workers
 	s.cfg = cfg
 	if s.lim != nil {
 		s.lim.SetLimit(rate.Limit(cfg.QPS))
@@ -86,6 +90,30 @@ func (s *Service) ApplyConfig(cfg Config) {
 		}
 		s.lim.SetBurst(b)
 	}
+	// 已运行：按需增补 worker
+	var spawn int
+	var workerCtx context.Context
+	if s.running && s.workerCtx != nil && cfg.Workers > s.activeWorkers {
+		spawn = cfg.Workers - s.activeWorkers
+		workerCtx = s.workerCtx
+		s.activeWorkers = cfg.Workers
+	}
+	_ = prevWorkers
+	s.mu.Unlock()
+
+	for i := 0; i < spawn; i++ {
+		s.wg.Add(1)
+		go s.workerLoop(workerCtx)
+	}
+}
+
+// SetOAuth 热替换 OAuth 客户端（URL / client_id 变更）。
+func (s *Service) SetOAuth(oauth OAuthClient) {
+	if s == nil || oauth == nil {
+		return
+	}
+	s.mu.Lock()
+	s.oauth = oauth
 	s.mu.Unlock()
 }
 
@@ -116,8 +144,10 @@ func (s *Service) Start(parent context.Context) error {
 	}
 	ctx, cancel := context.WithCancel(parent)
 	s.stop = cancel
+	s.workerCtx = ctx
 	s.jobs = make(chan string, s.cfg.JobBuffer)
 	s.running = true
+	s.activeWorkers = s.cfg.Workers
 
 	for i := 0; i < s.cfg.Workers; i++ {
 		s.wg.Add(1)
@@ -140,6 +170,8 @@ func (s *Service) Stop() {
 	}
 	cancel := s.stop
 	s.running = false
+	s.workerCtx = nil
+	s.activeWorkers = 0
 	s.mu.Unlock()
 	if cancel != nil {
 		cancel()
@@ -342,6 +374,16 @@ func (s *Service) ForceRefresh(ctx context.Context, accountID string) (catalog.T
 	return set, nil
 }
 
+// oauthClient 返回当前 OAuth 客户端（可热替换）。
+func (s *Service) oauthClient() OAuthClient {
+	if s == nil {
+		return nil
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.oauth
+}
+
 // refreshAndPersist 限流、调用 OAuth、CAS 落库（冲突时重试一次）。
 func (s *Service) refreshAndPersist(ctx context.Context, acct catalog.Account) (catalog.TokenSet, error) {
 	if err := s.lim.Wait(ctx); err != nil {
@@ -351,7 +393,11 @@ func (s *Service) refreshAndPersist(ctx context.Context, acct catalog.Account) (
 		return catalog.TokenSet{}, err
 	}
 
-	tokens, err := s.oauth.Refresh(ctx, acct.RefreshToken)
+	oauth := s.oauthClient()
+	if oauth == nil {
+		return catalog.TokenSet{}, fmt.Errorf("%w: nil oauth", ErrInvalidInput)
+	}
+	tokens, err := oauth.Refresh(ctx, acct.RefreshToken)
 	if err != nil {
 		s.refreshFail.Add(1)
 		if s.fail != nil {

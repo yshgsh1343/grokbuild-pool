@@ -12,6 +12,8 @@ import (
 	"github.com/yshgsh1343/grokbuild2api/internal/config"
 	"github.com/yshgsh1343/grokbuild2api/internal/httpserver"
 	"github.com/yshgsh1343/grokbuild2api/internal/importjobs"
+	"github.com/yshgsh1343/grokbuild2api/internal/protocol/upstream"
+	"github.com/yshgsh1343/grokbuild2api/internal/refresh"
 	"github.com/yshgsh1343/grokbuild2api/internal/ssoimport"
 )
 
@@ -190,6 +192,55 @@ func wireAdmin(cfg config.Config, pool *poolStack, up *upstreamStack, metrics *h
 		if err != nil {
 			fail(logger, "import_jobs_init_failed", err)
 		}
+	}
+
+	// 热更新上游 base_url（直连 poster + 出站工厂）
+	settingsCtl.ApplyUpstream = func(in admin.RuntimeSettings) error {
+		base := strings.TrimSpace(in.UpstreamBaseURL)
+		if base == "" {
+			base = config.DefaultUpstreamBaseURL
+		}
+		// 默认直连客户端
+		if uc, ok := up.Poster.(*upstream.Client); ok && uc != nil {
+			cfgU := uc.Config()
+			cfgU.BaseURL = base
+			uc.ApplyConfig(cfgU)
+		}
+		// 出站工厂：更新 base_url 并清空缓存，使后续按新 URL 建连
+		if up.Outbound != nil {
+			up.Outbound.UpdateBaseURL(base)
+		}
+		logger.Info("upstream_hot_updated", "base_url", base)
+		return nil
+	}
+	// 热更新 OAuth refresh_url / client_id（仅在门控允许真实 OAuth 时生效）
+	settingsCtl.ApplyOAuth = func(in admin.RuntimeSettings) error {
+		if up.Refresh == nil {
+			return nil
+		}
+		if !refresh.RealOAuthAllowed(cfg.OAuth.StatusPath) {
+			// 门控未开：保持 DisabledOAuth，仅落盘 URL/client_id 供下次启动
+			logger.Info("oauth_hot_skip_disabled_gate",
+				"refresh_url", strings.TrimSpace(in.OAuthRefreshURL),
+				"client_id_set", strings.TrimSpace(in.OAuthClientID) != "",
+			)
+			return nil
+		}
+		client := refresh.NewHTTPRefreshClient(refresh.HTTPRefreshConfig{
+			RefreshURL: in.OAuthRefreshURL,
+			ClientID:   in.OAuthClientID,
+		})
+		up.Refresh.SetOAuth(client)
+		logger.Info("oauth_hot_updated",
+			"refresh_url", firstNonEmpty(in.OAuthRefreshURL, refresh.DefaultXAITokenURL),
+			"client_id_set", strings.TrimSpace(in.OAuthClientID) != "",
+		)
+		return nil
+	}
+	// 热更新日志级别
+	settingsCtl.ApplyLogging = func(level string) {
+		logger.Info("logging_level_hot_update", "level", level)
+		slog.SetDefault(newLogger(level))
 	}
 
 	// 热更新导入限制 + SSO 转换器

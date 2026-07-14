@@ -271,7 +271,7 @@ score = WPriority * priority
 | `db_path` | `db_path` | 空 | 重启 | 空则 `data_dir/pool-10000.db` → `pool.db` |
 | `api_key` | `api_key`（仅 PUT） | 空 | 热更* | 静态 API Key；GET 不回说明文 |
 | `admin_key` | `admin_key`（仅 PUT） | 示例占位 | 热更* | 管理密钥；公网禁占位符 |
-| `hot_size` | `hot_size` | `3000` | 重启 | 热索引容量（启动固定） |
+| `hot_size` | `hot_size` | `3000` | 热更 | 热索引容量（保存后 Resize 并重建） |
 | `logging.level` | `logging_level` | `info` | 热更 | `debug` / `info` / `warn` / `error` |
 
 > \* 密钥：PUT 可改内存并落盘；GET 只回 `*_configured` 布尔。
@@ -282,7 +282,7 @@ score = WPriority * priority
 
 | YAML 键 | 管理台 JSON | 默认 | 生效方式 | 说明 |
 |---|---|---|---|---|
-| `upstream.base_url` | `upstream_base_url` | `https://cli-chat-proxy.grok.com/v1` | 重启 | 空也回落该默认 |
+| `upstream.base_url` | `upstream_base_url` | `https://cli-chat-proxy.grok.com/v1` | 热更 | 空也回落该默认；保存后直连/出站客户端即时切换 |
 | `upstream.client_version` | — | `0.2.93` | 启动 | CLI 版本头 |
 | `upstream.client_identifier` | — | `grok-pager` | 启动 | `x-grok-client-identifier` |
 | `upstream.user_agent` | — | `grok-pager/0.2.93 grok-shell/0.2.93 (linux; x86_64)` | 启动 | UA |
@@ -294,8 +294,8 @@ score = WPriority * priority
 
 | YAML 键 | 管理台 JSON | 默认 | 生效方式 | 说明 |
 |---|---|---|---|---|
-| `oauth.refresh_url` | `oauth_refresh_url` | 空 → `https://auth.x.ai/oauth2/token` | 重启 | Token 端点文档默认 |
-| `oauth.client_id` | `oauth_client_id` | 空（代码里有公开 CLI id 常量） | 重启 | 可选 |
+| `oauth.refresh_url` | `oauth_refresh_url` | 空 → `https://auth.x.ai/oauth2/token` | 热更* | Token 端点文档默认；门控开启时即时替换客户端 |
+| `oauth.client_id` | `oauth_client_id` | 空（代码里有公开 CLI id 常量） | 热更* | 可选；门控开启时即时替换 |
 | `oauth.status_path` | — | 空 | 启动 | 读 `UNLOCK_M12` 的 `STATUS` 路径 |
 
 启用真刷新条件：
@@ -466,14 +466,14 @@ score = w_priority * priority
 
 | 需手动重启才完全生效 | 保存后即时热更 |
 |---|---|
-| `listen` / `data_dir` / `db_path` | 选号权重、`pow2_k`、粘性参数 |
-| `upstream_base_url` | `max_inflight_per_account` |
-| `hot_size` | lease 冷却 / 隔离阈值 |
-| `refresh_workers` | `max_concurrent` / body / 超时 |
-|  | `refresh_qps` / `refresh_skew_sec` |
+| `listen` / `data_dir` / `db_path` | 选号权重、`pow2_k`、粘性参数、`hot_size` |
+|  | `upstream_base_url`、OAuth URL/client_id（门控开启时） |
+|  | `max_inflight_per_account`、lease 冷却 / 隔离阈值 |
+|  | `max_concurrent` / body / 超时、`logging_level` |
+|  | `refresh_workers`（仅增补）/ `refresh_qps` / `refresh_skew_sec` |
 |  | 导入限制、Anthropic 别名、令牌模板 |
 
-保存不会自动重启进程；有需重启字段时 toast / hint 会标明。
+保存不会自动重启进程。仅 `listen` / `data_dir` / `db_path` 变更时 toast / hint 会提示需手动重启；其余参数保存后即时生效。
 
 
 ## 鸣谢

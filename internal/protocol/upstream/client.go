@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -38,7 +39,9 @@ type Config struct {
 }
 
 // Client is a thin HTTP client for cli-chat-proxy.
+// cfg 可经 ApplyConfig 热更（如 base_url）；读路径用 RLock。
 type Client struct {
+	mu   sync.RWMutex
 	cfg  Config
 	http *http.Client
 }
@@ -73,6 +76,8 @@ func (c *Client) Config() Config {
 	if c == nil {
 		return Config{}
 	}
+	c.mu.RLock()
+	defer c.mu.RUnlock()
 	return c.cfg
 }
 
@@ -81,7 +86,30 @@ func (c *Client) BaseURL() string {
 	if c == nil {
 		return DefaultBaseURL
 	}
+	c.mu.RLock()
+	defer c.mu.RUnlock()
 	return c.cfg.BaseURL
+}
+
+// ApplyConfig 热更新上游参数（base_url / headers 等）。
+// 若 cfg.HTTPClient 为 nil，保留现有 HTTP 客户端与连接池。
+func (c *Client) ApplyConfig(cfg Config) {
+	if c == nil {
+		return
+	}
+	cfg = normalizeConfig(cfg)
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if cfg.HTTPClient == nil {
+		cfg.HTTPClient = c.cfg.HTTPClient
+	} else {
+		c.http = cfg.HTTPClient
+	}
+	// 保留未在新配置中显式给出的超时（normalize 不改 RequestTimeout 零值语义）
+	if cfg.RequestTimeout <= 0 {
+		cfg.RequestTimeout = c.cfg.RequestTimeout
+	}
+	c.cfg = cfg
 }
 
 // RequestOptions customizes a single upstream call.
@@ -106,7 +134,8 @@ func (c *Client) NewRequest(ctx context.Context, method, path string, body io.Re
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	u := joinURL(c.cfg.BaseURL, path)
+	cfg := c.Config()
+	u := joinURL(cfg.BaseURL, path)
 	req, err := http.NewRequestWithContext(ctx, method, u, body)
 	if err != nil {
 		return nil, fmt.Errorf("upstream: create request: %w", err)
@@ -115,10 +144,10 @@ func (c *Client) NewRequest(ctx context.Context, method, path string, body io.Re
 		AccessToken:      opts.AccessToken,
 		Model:            opts.Model,
 		ConvID:           opts.ConvID,
-		ClientVersion:    c.cfg.ClientVersion,
-		ClientIdentifier: c.cfg.ClientIdentifier,
-		TokenAuth:        c.cfg.TokenAuth,
-		UserAgent:        c.cfg.UserAgent,
+		ClientVersion:    cfg.ClientVersion,
+		ClientIdentifier: cfg.ClientIdentifier,
+		TokenAuth:        cfg.TokenAuth,
+		UserAgent:        cfg.UserAgent,
 		Accept:           opts.Accept,
 		ContentType:      opts.ContentType,
 		Extra:            opts.ExtraHeaders,

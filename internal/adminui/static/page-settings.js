@@ -25,7 +25,7 @@ export function renderSettings() {
         esc(s.title) + "</button>";
     }).join("") + "</nav>";
   $("main").innerHTML = wrapPage(
-    pageHd("参数设计器", "手动「保存并应用」后写入；多数项即时热更 · 标注「需重启」的项不会自动重启进程 · 密钥留空表示不修改",
+    pageHd("参数设计器", "手动「保存并应用」后写入；多数项即时热更 · 仅 listen / data_dir / db_path 需手动重启 · 密钥留空表示不修改",
       '<button type="button" class="page-action-btn" id="reloadSet">重新加载</button>' +
       '<button type="button" class="page-action-btn-primary" id="saveSet">保存并应用</button>') +
     subnav +
@@ -197,8 +197,8 @@ export function renderSettings() {
           { v: "warn", l: "warn" }, { v: "error", l: "error" }
         ])
       );
-      html += section("refresh", "Token 刷新 workers", "QPS / Skew 保存后即时生效；Workers 数量仅落盘，需重启后调整",
-        field("Workers（需重启）", "sRW", s.refresh_workers) +
+      html += section("refresh", "Token 刷新 workers", "QPS / Skew / Workers 保存后即时生效（Workers 仅可增补，不中断在途刷新）",
+        field("Workers（2–4，热更增补）", "sRW", s.refresh_workers) +
         field("Refresh QPS", "sRQ", s.refresh_qps) +
         field("Skew 秒", "sRS", s.refresh_skew_sec)
       );
@@ -233,14 +233,14 @@ export function renderSettings() {
         fieldText("透传前缀(逗号分隔)", "sAnPre", prefixesToText(s.anthropic_passthrough_prefixes), "grok-") +
         fieldArea("模型别名映射", "sAnMap", aliasesToText(s.anthropic_model_aliases), 10)
       );
-      html += section("deploy", "部署 / 上游 / 密钥", "listen/data_dir/upstream 等保存后仅落盘，需手动重启进程；始终反代真实 upstream；密钥留空不改",
-        fieldText("Listen", "sListen", s.listen || "") +
+      html += section("deploy", "部署 / 上游 / 密钥", "upstream / OAuth 保存后即时热更；listen / data_dir / db_path 仅落盘需手动重启；密钥留空不改",
+        fieldText("Listen（需重启）", "sListen", s.listen || "") +
         fieldBool("Allow public listen", "sPub", !!s.allow_public_listen) +
-        fieldText("Data dir", "sData", s.data_dir || "") +
-        fieldText("DB path", "sDB", s.db_path || "") +
-        fieldText("Upstream base URL（需重启）", "sUp", s.upstream_base_url || "", "https://…/v1") +
-        fieldText("OAuth refresh URL", "sOAuth", s.oauth_refresh_url || "") +
-        fieldText("OAuth client_id", "sOAuthCID", s.oauth_client_id || "") +
+        fieldText("Data dir（需重启）", "sData", s.data_dir || "") +
+        fieldText("DB path（需重启）", "sDB", s.db_path || "") +
+        fieldText("Upstream base URL（热更）", "sUp", s.upstream_base_url || "", "https://…/v1") +
+        fieldText("OAuth refresh URL（热更）", "sOAuth", s.oauth_refresh_url || "") +
+        fieldText("OAuth client_id（热更）", "sOAuthCID", s.oauth_client_id || "") +
         fieldText("API Key(留空不改)", "sApiKey", "", s.api_key_configured ? "已配置" : "未配置") +
         fieldText("Admin Key(留空不改)", "sAdmKey", "", s.admin_key_configured ? "已配置" : "未配置")
       );
