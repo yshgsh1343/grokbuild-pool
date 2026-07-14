@@ -101,6 +101,10 @@ func serveHTTP(cfg config.Config, pool *poolStack, up *upstreamStack, adm *admin
 			case <-t.C:
 				s := pool.Hot.Stats(0)
 				metrics.SetPoolGauges(s.HotSize, s.CooldownCount)
+				if pool.Selector != nil {
+					pHit, sHit, re := pool.Selector.StickyStats()
+					metrics.SetStickyStats(pHit, sHit, re)
+				}
 				ok, failN, hit := up.Refresh.Stats()
 				metrics.SetRefreshStats(ok, failN, hit)
 				if st, err := pool.Catalog.Stats(); err == nil {
