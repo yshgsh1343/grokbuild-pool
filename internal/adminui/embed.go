@@ -1,9 +1,9 @@
-// Package adminui 提供零构建管理台（深/浅色），通过 //go:embed 打入二进制。
+// Package adminui serves the React admin SPA (Vite build under dist/).
 //
-// 挂载约定（与 pool-proxy 一致）：
+// Mount convention (pool-proxy):
 //
-//	/admin、/admin/  → index.html（无需 admin_key）
-//	/admin/ui/*      → static 下 CSS/JS 等静态资源
+//	/admin、/admin/  → dist/index.html（无需 admin_key）
+//	/admin/ui/*      → dist 下 CSS/JS 等静态资源
 //
 // JSON 管理 API 仍由 internal/admin 鉴权挂载；本包只负责静态壳。
 package adminui
@@ -16,8 +16,8 @@ import (
 	"strings"
 )
 
-//go:embed static/*
-var staticFS embed.FS
+//go:embed all:dist
+var distFS embed.FS
 
 // Mount 挂载管理台静态资源（无需 admin_key；API 另鉴权）。
 // 路由保持：/admin、/admin/、/admin/ui/*。
@@ -25,13 +25,12 @@ func Mount(mux *http.ServeMux) {
 	if mux == nil {
 		return
 	}
-	sub, err := fs.Sub(staticFS, "static")
+	sub, err := fs.Sub(distFS, "dist")
 	if err != nil {
 		return
 	}
 	fileServer := http.FileServer(http.FS(sub))
 
-	// /admin → /admin/
 	mux.HandleFunc("/admin", func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/admin" {
 			http.NotFound(w, r)
@@ -43,9 +42,9 @@ func Mount(mux *http.ServeMux) {
 	mux.HandleFunc("/admin/", func(w http.ResponseWriter, r *http.Request) {
 		setSecurityHeaders(w)
 
-		// SPA 壳
+		// SPA 壳：仅 /admin/ 返回 index.html（HashRouter，无需 path fallback）
 		if r.URL.Path == "/admin/" || r.URL.Path == "/admin" {
-			b, err := staticFS.ReadFile("static/index.html")
+			b, err := distFS.ReadFile("dist/index.html")
 			if err != nil {
 				http.Error(w, "ui missing", http.StatusInternalServerError)
 				return
@@ -65,7 +64,7 @@ func Mount(mux *http.ServeMux) {
 			return
 		}
 
-		// /admin/ui/* → static 根（app.css / app.js）
+		// /admin/ui/* → dist 根（Vite base: /admin/ui/）
 		if strings.HasPrefix(r.URL.Path, "/admin/ui/") {
 			if r.Method != http.MethodGet && r.Method != http.MethodHead {
 				http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -78,14 +77,30 @@ func Mount(mux *http.ServeMux) {
 				http.NotFound(w, r)
 				return
 			}
-			// 类型与缓存
 			switch {
 			case strings.HasSuffix(name, ".js"):
 				w.Header().Set("Content-Type", "application/javascript; charset=utf-8")
-				w.Header().Set("Cache-Control", "no-cache")
+				// hashed assets can be cached longer; keep no-cache for safety with SPA updates
+				if strings.Contains(name, "assets/") {
+					w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+				} else {
+					w.Header().Set("Cache-Control", "no-cache")
+				}
 			case strings.HasSuffix(name, ".css"):
 				w.Header().Set("Content-Type", "text/css; charset=utf-8")
-				w.Header().Set("Cache-Control", "no-cache")
+				if strings.Contains(name, "assets/") {
+					w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+				} else {
+					w.Header().Set("Cache-Control", "no-cache")
+				}
+			case strings.HasSuffix(name, ".svg"):
+				w.Header().Set("Content-Type", "image/svg+xml")
+			case strings.HasSuffix(name, ".png"):
+				w.Header().Set("Content-Type", "image/png")
+			case strings.HasSuffix(name, ".ico"):
+				w.Header().Set("Content-Type", "image/x-icon")
+			case strings.HasSuffix(name, ".woff2"):
+				w.Header().Set("Content-Type", "font/woff2")
 			}
 			if _, err := sub.Open(name); err != nil {
 				http.NotFound(w, r)
@@ -101,17 +116,16 @@ func Mount(mux *http.ServeMux) {
 	})
 }
 
-// setSecurityHeaders 统一安全响应头（CSP 禁止 inline script，适配外部 app.js）。
 func setSecurityHeaders(w http.ResponseWriter) {
 	w.Header().Set("X-Frame-Options", "DENY")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.Header().Set("Referrer-Policy", "no-referrer")
-	// 无 inline 事件/脚本；样式走外部 app.css（无 'unsafe-inline'）
+	// script 仅外部包；style 允许 React 动态宽度等少量 inline（进度条）
 	w.Header().Set("Content-Security-Policy",
-		"default-src 'self'; style-src 'self'; script-src 'self'; img-src 'self' data:; connect-src 'self'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'")
+		"default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; img-src 'self' data:; connect-src 'self'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'")
 }
 
-// ReadStatic 读取已嵌入的 static 文件（测试/调试用）。
+// ReadStatic 读取已嵌入的 dist 文件（测试/调试用）。
 func ReadStatic(name string) ([]byte, error) {
-	return staticFS.ReadFile(path.Join("static", name))
+	return distFS.ReadFile(path.Join("dist", name))
 }

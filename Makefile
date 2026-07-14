@@ -1,10 +1,21 @@
-.PHONY: build build-scheme2 test test-scheme2 vet docker clean
+.PHONY: build build-go build-scheme2 frontend-build test test-scheme2 vet docker clean
 
 GO ?= go
 BIN := bin
 IMAGE ?= grokbuild2api:latest
+PNPM ?= pnpm
 
-build:
+# Default build: React admin UI then Go binaries
+build: frontend-build build-go
+
+frontend-build:
+	cd frontend && $(PNPM) install --frozen-lockfile
+	cd frontend && $(PNPM) build
+	rm -rf internal/adminui/dist
+	mkdir -p internal/adminui/dist
+	cp -a frontend/dist/. internal/adminui/dist/
+
+build-go:
 	@mkdir -p $(BIN)
 	CGO_ENABLED=0 $(GO) build -trimpath -ldflags="-s -w" -o $(BIN)/poolctl ./cmd/poolctl
 	CGO_ENABLED=0 $(GO) build -trimpath -ldflags="-s -w" -o $(BIN)/pool-proxy ./cmd/pool-proxy
@@ -32,4 +43,4 @@ docker:
 	docker build -t $(IMAGE) .
 
 clean:
-	rm -rf $(BIN)
+	rm -rf $(BIN) frontend/dist

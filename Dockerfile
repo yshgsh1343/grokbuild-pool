@@ -1,10 +1,18 @@
-# 多阶段构建：最终镜像仅含运行时二进制（无 Python）
-FROM golang:1.26-bookworm AS builder
+# Multi-stage: React admin UI → Go binaries → slim runtime
+FROM node:22-bookworm AS frontend
+WORKDIR /src/frontend
+RUN corepack enable
+COPY frontend/package.json frontend/pnpm-lock.yaml frontend/pnpm-workspace.yaml ./
+RUN pnpm install --frozen-lockfile
+COPY frontend/ ./
+RUN pnpm build
 
+FROM golang:1.26-bookworm AS builder
 WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
+COPY --from=frontend /src/frontend/dist ./internal/adminui/dist
 RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
     go build -trimpath -ldflags="-s -w" -o /out/pool-proxy ./cmd/pool-proxy \
  && CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
