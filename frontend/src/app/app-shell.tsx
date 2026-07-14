@@ -1,4 +1,6 @@
 import {
+  Braces,
+  GitBranch,
   Import,
   KeyRound,
   LayoutDashboard,
@@ -30,9 +32,11 @@ const navigation = [
   { href: "/dashboard", label: "仪表盘", icon: LayoutDashboard },
   { href: "/accounts", label: "账号", icon: Users },
   { href: "/tokens", label: "Token", icon: KeyRound },
+  { href: "/scheduler", label: "选号模式", icon: GitBranch },
   { href: "/proxy-pool", label: "代理池", icon: Network },
-  { href: "/imports", label: "导入任务", icon: Import },
+  { href: "/imports", label: "导入", icon: Import },
   { href: "/settings", label: "设置", icon: Settings },
+  { href: "/settings/json", label: "JSON", icon: Braces },
 ] as const;
 
 export function AppShell() {

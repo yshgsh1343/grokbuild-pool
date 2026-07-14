@@ -120,9 +120,9 @@ func setSecurityHeaders(w http.ResponseWriter) {
 	w.Header().Set("X-Frame-Options", "DENY")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.Header().Set("Referrer-Policy", "no-referrer")
-	// script 仅外部包；style 允许 React 动态宽度等少量 inline（进度条）
+	// script 仅外部包；style 允许 React 动态宽度 + Google Fonts；字体 gstatic
 	w.Header().Set("Content-Security-Policy",
-		"default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; img-src 'self' data:; connect-src 'self'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'")
+		"default-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; script-src 'self'; img-src 'self' data:; connect-src 'self'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'")
 }
 
 // ReadStatic 读取已嵌入的 dist 文件（测试/调试用）。

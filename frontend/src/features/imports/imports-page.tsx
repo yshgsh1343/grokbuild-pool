@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { FolderOpen, RefreshCw, Upload } from "lucide-react";
+import { ChevronDown, ChevronRight, FolderOpen, RefreshCw, Upload } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 
@@ -38,6 +38,13 @@ import { DataTableShell } from "@/shared/components/data-table-shell";
 import { PageHeader } from "@/shared/components/page-header";
 import { formatBytes } from "@/shared/lib/format";
 import { cn } from "@/shared/lib/cn";
+import {
+  BoolField,
+  NumField,
+  SettingsSection,
+  TextField,
+} from "@/shared/settings/settings-fields";
+import { useSettingsForm } from "@/shared/settings/use-settings-form";
 
 function phaseLabel(j: ImportJob): string {
   if (j.message) return String(j.message);
@@ -73,6 +80,8 @@ export function ImportsPage() {
   const [serverCurrent, setServerCurrent] = useState("");
   const [serverErr, setServerErr] = useState<string | null>(null);
   const [serverLoading, setServerLoading] = useState(false);
+  const [showImportSettings, setShowImportSettings] = useState(false);
+  const importSettings = useSettingsForm();
 
   const listQ = useQuery({
     queryKey: ["import-jobs"],
@@ -172,8 +181,8 @@ export function ImportsPage() {
   return (
     <div className="space-y-4">
       <PageHeader
-        title="导入任务"
-        description="本地上传或服务端路径导入；SSO 需 Device Flow 换票，下方显示实时进度"
+        title="导入"
+        description="本地上传或服务端路径导入；SSO 需 Device Flow 换票。导入相关参数可在本页展开设置。"
         actions={
           <Button
             variant="ghost"
@@ -186,6 +195,163 @@ export function ImportsPage() {
           </Button>
         }
       />
+
+      <div className="rounded-lg border border-border bg-card">
+        <button
+          type="button"
+          className="flex w-full items-center gap-2 px-4 py-3 text-left text-sm font-medium"
+          onClick={() => setShowImportSettings((v) => !v)}
+        >
+          {showImportSettings ? (
+            <ChevronDown className="size-4 text-muted-foreground" />
+          ) : (
+            <ChevronRight className="size-4 text-muted-foreground" />
+          )}
+          导入设置
+          <span className="ml-1 text-xs font-normal text-muted-foreground">
+            启用 / 条数 / workers / 服务端目录 / SSO
+          </span>
+        </button>
+        {showImportSettings && importSettings.form ? (
+          <div className="space-y-3 border-t border-border p-4">
+            <SettingsSection
+              title="导入限制"
+              note="保存后即时热更；进行中任务保持旧值，新任务用新值"
+            >
+              <BoolField
+                form={importSettings.form}
+                set={importSettings.set}
+                label="启用导入"
+                k="import_enabled"
+              />
+              <NumField
+                form={importSettings.form}
+                set={importSettings.set}
+                label="最大上传字节(0=不限)"
+                k="import_max_upload_bytes"
+              />
+              <NumField
+                form={importSettings.form}
+                set={importSettings.set}
+                label="最大条目/任务"
+                k="import_max_entries"
+              />
+              <NumField
+                form={importSettings.form}
+                set={importSettings.set}
+                label="并发任务数"
+                k="import_max_concurrent_jobs"
+              />
+              <NumField
+                form={importSettings.form}
+                set={importSettings.set}
+                label="解析 workers"
+                k="import_workers"
+              />
+              <NumField
+                form={importSettings.form}
+                set={importSettings.set}
+                label="Canary 热池条数(0=全量)"
+                k="import_canary_hot_size"
+              />
+              <NumField
+                form={importSettings.form}
+                set={importSettings.set}
+                label="Canary 抑制全量重载秒"
+                k="import_canary_hold_sec"
+              />
+              <NumField
+                form={importSettings.form}
+                set={importSettings.set}
+                label="任务超时秒"
+                k="import_job_timeout_sec"
+              />
+              <BoolField
+                form={importSettings.form}
+                set={importSettings.set}
+                label="允许服务端路径"
+                k="import_allow_server_path"
+              />
+              <TextField
+                form={importSettings.form}
+                set={importSettings.set}
+                label="服务端导入根目录"
+                k="import_server_dir"
+                placeholder="/data/imports 或空=data_dir"
+              />
+              <TextField
+                form={importSettings.form}
+                set={importSettings.set}
+                label="导入专用代理URL(可选)"
+                k="import_proxy_url"
+                placeholder="socks5://…"
+              />
+            </SettingsSection>
+            <SettingsSection title="SSO 转换" note="空 endpoint 用内置 Go Device Flow">
+              <TextField
+                form={importSettings.form}
+                set={importSettings.set}
+                label="SSO Endpoint"
+                k="import_sso_endpoint"
+                placeholder="https://…/v1/convert"
+              />
+              <TextField
+                form={importSettings.form}
+                set={importSettings.set}
+                label="SSO API Key(留空不改)"
+                k="import_sso_api_key"
+                placeholder={
+                  importSettings.meta?.import_sso_api_key_set
+                    ? "已配置 · 留空保持"
+                    : "未配置"
+                }
+                type="password"
+              />
+              <NumField
+                form={importSettings.form}
+                set={importSettings.set}
+                label="SSO max_batch"
+                k="import_sso_max_batch"
+              />
+              <NumField
+                form={importSettings.form}
+                set={importSettings.set}
+                label="SSO timeout 秒"
+                k="import_sso_timeout_sec"
+              />
+              <NumField
+                form={importSettings.form}
+                set={importSettings.set}
+                label="SSO workers"
+                k="import_sso_workers"
+              />
+              <BoolField
+                form={importSettings.form}
+                set={importSettings.set}
+                label="SSO allow_insecure"
+                k="import_sso_allow_insecure"
+              />
+            </SettingsSection>
+            <div className="flex justify-end gap-2">
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={importSettings.reload}
+                disabled={importSettings.query.isFetching}
+              >
+                重新加载
+              </Button>
+              <Button
+                size="sm"
+                disabled={importSettings.saveMutation.isPending}
+                onClick={importSettings.saveFull}
+              >
+                {importSettings.saveMutation.isPending ? "保存中…" : "保存导入设置"}
+              </Button>
+            </div>
+          </div>
+        ) : null}
+      </div>
 
       <div className="rounded-lg border border-border bg-card p-4">
         <div className="grid gap-3 sm:grid-cols-2">
