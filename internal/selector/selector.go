@@ -63,7 +63,19 @@ func (s *Selector) ApplyConfig(cfg Config) {
 	if s == nil {
 		return
 	}
-	cfg = cfg.normalize()
+	// 管理台热更：允许权重/抖动为 0，不再用 Default 覆盖。
+	if cfg.Strategy == "" {
+		cfg.Strategy = "stable_rr"
+	}
+	if cfg.MaxAttempts < 1 {
+		cfg.MaxAttempts = 1
+	}
+	if cfg.Pow2K < 1 {
+		cfg.Pow2K = 1
+	}
+	if cfg.StickyMax < 0 {
+		cfg.StickyMax = 0
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	old := s.cfg

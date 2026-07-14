@@ -33,7 +33,7 @@ type Config struct {
 	MaxBatch int
 	// Timeout 为单请求超时（默认 300s）。
 	Timeout time.Duration
-	// Workers 为 Convert 内部 batch 并行度（默认 4，最大 128）。
+	// Workers 为 Convert 内部 batch 并行度（默认 4，最大 512）。
 	Workers int
 	// AllowInsecure 允许 loopback/私网/单标签主机使用 http://。
 	AllowInsecure bool
@@ -99,8 +99,8 @@ func NewClient(cfg Config) (*Client, error) {
 		// 默认 4 路并行 batch，大文件导入时显著加速
 		cfg.Workers = 4
 	}
-	if cfg.Workers > 128 {
-		cfg.Workers = 128
+	if cfg.Workers > 512 {
+		cfg.Workers = 512
 	}
 	if cfg.HTTPClient == nil {
 		cfg.HTTPClient = &http.Client{Timeout: cfg.Timeout}

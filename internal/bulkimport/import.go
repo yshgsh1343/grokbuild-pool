@@ -29,7 +29,7 @@ const (
 // 默认值。
 const (
 	DefaultWorkers     = 4
-	MaxWorkers         = 128
+	MaxWorkers         = 512
 	DefaultBatch       = 500
 	ProgressEvery      = 5000
 	DefaultMaxRSSBytes = 5 << 30 // 5 GiB

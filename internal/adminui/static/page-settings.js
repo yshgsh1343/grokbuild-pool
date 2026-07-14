@@ -25,7 +25,7 @@ export function renderSettings() {
         esc(s.title) + "</button>";
     }).join("") + "</nav>";
   $("main").innerHTML = wrapPage(
-    pageHd("参数设计器", "手动「保存并应用」后写入；多数项即时热更 · 仅 listen / data_dir / db_path 需手动重启 · 密钥留空表示不修改",
+    pageHd("参数设计器", "手动「保存并应用」后写入；多数项即时热更 · 参数尽量热更；仅 listen / data_dir / db_path 需手动重启 · 密钥留空表示不修改",
       '<button type="button" class="page-action-btn" id="reloadSet">重新加载</button>' +
       '<button type="button" class="page-action-btn-primary" id="saveSet">保存并应用</button>') +
     subnav +
@@ -210,8 +210,8 @@ export function renderSettings() {
           { v: "warn", l: "warn" }, { v: "error", l: "error" }
         ])
       );
-      html += section("refresh", "Token 刷新 workers", "QPS / Skew / Workers 保存后即时生效（Workers 仅可增补，不中断在途刷新）",
-        field("Workers（2–4，热更增补）", "sRW", s.refresh_workers) +
+      html += section("refresh", "Token 刷新 workers", "QPS / Skew / Workers 保存后即时生效（Workers 只增补不杀在途）",
+        field("Workers（热更可增补）", "sRW", s.refresh_workers) +
         field("Refresh QPS", "sRQ", s.refresh_qps) +
         field("Skew 秒", "sRS", s.refresh_skew_sec)
       );
@@ -221,12 +221,12 @@ export function renderSettings() {
         field("默认 RPM", "sTR", s.token_default_rpm) +
         fieldBool("默认无限额度", "sTU", !!s.token_default_unlimited)
       );
-      html += section("import", "导入 / SSO 转换", "保存后即时热更到导入管理器（进行中任务不改，新任务立即用新值）。JSON 秒级落库；SSO Device Flow 可调 SSO workers。条目/并发/workers 已放宽硬顶。",
+      html += section("import", "导入 / SSO 转换", "保存后即时热更（进行中任务保持旧值，新任务用新值）。参数尽量不写死，仅保留防崩溃上限。",
         fieldBool("启用导入", "sImpEn", !!s.import_enabled) +
         field("最大上传字节(0=不限)", "sImpUp", s.import_max_upload_bytes) +
-        field("最大条目/任务(≤200万)", "sImpEnt", s.import_max_entries) +
-        field("并发任务数(≤64)", "sImpJobs", s.import_max_concurrent_jobs) +
-        field("解析 workers(≤128)", "sImpW", s.import_workers) +
+        field("最大条目/任务", "sImpEnt", s.import_max_entries) +
+        field("并发任务数", "sImpJobs", s.import_max_concurrent_jobs) +
+        field("解析 workers", "sImpW", s.import_workers) +
         field("导入 Canary 热池条数(0=全量)", "sImpCanary", s.import_canary_hot_size != null ? s.import_canary_hot_size : 0) +
         field("Canary 抑制全量重载秒", "sImpHold", s.import_canary_hold_sec != null ? s.import_canary_hold_sec : 300) +
         field("NDJSON 行上限", "sImpNd", s.import_max_ndjson_line_bytes) +
@@ -236,9 +236,9 @@ export function renderSettings() {
         fieldBool("允许服务端路径", "sImpPath", !!s.import_allow_server_path) +
         fieldText("SSO Endpoint", "sSsoEp", s.import_sso_endpoint || "", "https://…/v1/convert") +
         fieldText("SSO API Key(留空不改)", "sSsoKey", "", s.import_sso_api_key_set ? "已配置 · 留空保持" : "未配置") +
-        field("SSO max_batch(≤500)", "sSsoBatch", s.import_sso_max_batch) +
+        field("SSO max_batch", "sSsoBatch", s.import_sso_max_batch) +
         field("SSO timeout 秒", "sSsoTO", s.import_sso_timeout_sec) +
-        field("SSO workers(≤128)", "sSsoW", s.import_sso_workers) +
+        field("SSO workers", "sSsoW", s.import_sso_workers) +
         fieldBool("SSO allow_insecure", "sSsoInsec", !!s.import_sso_allow_insecure)
       );
       html += section("anthropic", "Anthropic / 模型别名", "别名每行：claude-sonnet-4 = grok-4.5",

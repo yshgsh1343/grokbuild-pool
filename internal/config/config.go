@@ -44,7 +44,7 @@ const (
 	DefaultImportJobTimeoutSec      = 2 * 60 * 60
 	DefaultImportStagingStaleSec    = 24 * 60 * 60
 	// MaxImportUploadBytes 为显式体积上限的硬顶（2 GiB）；0 仍表示不限。
-	MaxImportUploadBytes = 2 << 30
+	MaxImportUploadBytes = 8 << 30
 	// DefaultUpstreamBaseURL 默认直连 Grok Build CLI chat 代理。
 	DefaultUpstreamBaseURL = "https://cli-chat-proxy.grok.com/v1"
 )
@@ -536,10 +536,10 @@ func (c Config) Validate() error {
 	if !isLoopbackListen(c.Listen) && adminKey == "" {
 		return fmt.Errorf("config: public listen requires a non-empty admin_key")
 	}
-	if c.Limits.MaxConcurrent > 10_000 {
+	if c.Limits.MaxConcurrent > 1_000_000 {
 		return fmt.Errorf("config: max_concurrent %d too large", c.Limits.MaxConcurrent)
 	}
-	if c.HotSize > 200_000 {
+	if c.HotSize > 5_000_000 {
 		return fmt.Errorf("config: hot_size %d too large", c.HotSize)
 	}
 	// 0 = 不限体积（只按 max_entries）；>0 时 1 MiB … MaxImportUploadBytes。
@@ -556,29 +556,29 @@ func (c Config) Validate() error {
 		c.Imports.MaxRequestBytes < c.Imports.MaxUploadBytes+DefaultImportRequestOverhead {
 		return fmt.Errorf("config: imports.max_request_bytes must exceed max_upload_bytes by at least 1 MiB when both are set")
 	}
-	if c.Imports.MaxEntries < 1 || c.Imports.MaxEntries > 2_000_000 {
-		return fmt.Errorf("config: imports.max_entries must be between 1 and 2000000")
+	if c.Imports.MaxEntries < 1 || c.Imports.MaxEntries > 10_000_000 {
+		return fmt.Errorf("config: imports.max_entries must be between 1 and 10000000")
 	}
-	if c.Imports.MaxNDJSONLineBytes < 4<<10 || c.Imports.MaxNDJSONLineBytes > 4<<20 {
-		return fmt.Errorf("config: imports.max_ndjson_line_bytes must be between 4 KiB and 4 MiB")
+	if c.Imports.MaxNDJSONLineBytes < 1<<10 || c.Imports.MaxNDJSONLineBytes > 64<<20 {
+		return fmt.Errorf("config: imports.max_ndjson_line_bytes must be between 1 KiB and 64 MiB")
 	}
-	if c.Imports.MaxSSOValueBytes < 1<<10 || c.Imports.MaxSSOValueBytes > 64<<10 {
-		return fmt.Errorf("config: imports.max_sso_value_bytes must be between 1 KiB and 64 KiB")
+	if c.Imports.MaxSSOValueBytes < 256 || c.Imports.MaxSSOValueBytes > 1<<20 {
+		return fmt.Errorf("config: imports.max_sso_value_bytes must be between 256 B and 1 MiB")
 	}
-	if c.Imports.MaxConcurrentJobs < 1 || c.Imports.MaxConcurrentJobs > 64 {
-		return fmt.Errorf("config: imports.max_concurrent_jobs must be between 1 and 64")
+	if c.Imports.MaxConcurrentJobs < 1 || c.Imports.MaxConcurrentJobs > 256 {
+		return fmt.Errorf("config: imports.max_concurrent_jobs must be between 1 and 256")
 	}
-	if c.Imports.JobTimeoutSec < 60 || c.Imports.JobTimeoutSec > 24*60*60 {
-		return fmt.Errorf("config: imports.job_timeout_sec must be between 60 and 86400")
+	if c.Imports.JobTimeoutSec < 1 || c.Imports.JobTimeoutSec > 7*24*60*60 {
+		return fmt.Errorf("config: imports.job_timeout_sec must be between 1 and 604800")
 	}
 	if c.Imports.StagingStaleAfterSec < c.Imports.JobTimeoutSec {
 		return fmt.Errorf("config: imports.staging_stale_after_sec must be >= job_timeout_sec")
 	}
-	if c.Imports.SSOConverter.MaxBatch < 1 || c.Imports.SSOConverter.MaxBatch > 500 {
-		return fmt.Errorf("config: imports.sso_converter.max_batch must be between 1 and 500")
+	if c.Imports.SSOConverter.MaxBatch < 1 || c.Imports.SSOConverter.MaxBatch > 2000 {
+		return fmt.Errorf("config: imports.sso_converter.max_batch must be between 1 and 2000")
 	}
-	if c.Imports.SSOConverter.TimeoutSec < 1 || c.Imports.SSOConverter.TimeoutSec > 300 {
-		return fmt.Errorf("config: imports.sso_converter.timeout_sec must be between 1 and 300")
+	if c.Imports.SSOConverter.TimeoutSec < 1 || c.Imports.SSOConverter.TimeoutSec > 3600 {
+		return fmt.Errorf("config: imports.sso_converter.timeout_sec must be between 1 and 3600")
 	}
 	return nil
 }

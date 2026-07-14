@@ -388,51 +388,57 @@ func (c *SettingsController) persist() error {
 
 // Apply 校验并应用设置（部分参数即时生效）；成功后原子落盘。
 func (c *SettingsController) Apply(in RuntimeSettings) (RuntimeSettings, error) {
-	// 边界
+	// 边界：只拦负值与极端防崩溃上限，不把运维常用区间写死。
 	if in.MaxInflightPerAccount < 0 {
 		in.MaxInflightPerAccount = 0
 	}
-	if in.MaxInflightPerAccount > 64 {
-		in.MaxInflightPerAccount = 64
+	if in.MaxInflightPerAccount > 1024 {
+		in.MaxInflightPerAccount = 1024
 	}
-	if in.CooldownBaseSec < 1 {
-		in.CooldownBaseSec = 1
+	if in.CooldownBaseSec < 0 {
+		in.CooldownBaseSec = 0
 	}
-	if in.CooldownCapSec < in.CooldownBaseSec {
+	if in.CooldownCapSec > 0 && in.CooldownBaseSec > 0 && in.CooldownCapSec < in.CooldownBaseSec {
 		in.CooldownCapSec = in.CooldownBaseSec
 	}
-	if in.ForbiddenCooldownSec < 1 {
-		in.ForbiddenCooldownSec = 1
+	if in.ForbiddenCooldownSec < 0 {
+		in.ForbiddenCooldownSec = 0
 	}
 	if in.CooldownJitterPct < 0 {
 		in.CooldownJitterPct = 0
 	}
-	if in.CooldownJitterPct > 50 {
-		in.CooldownJitterPct = 50
+	if in.CooldownJitterPct > 100 {
+		in.CooldownJitterPct = 100
 	}
 	if in.MaxConcurrent < 0 {
 		in.MaxConcurrent = 0
 	}
-	if in.MaxConcurrent > 10000 {
-		in.MaxConcurrent = 10000
+	if in.MaxConcurrent > 1_000_000 {
+		in.MaxConcurrent = 1_000_000
 	}
-	if in.Pow2K < 1 {
-		in.Pow2K = 1
+	if in.Pow2K < 0 {
+		in.Pow2K = 0
 	}
-	if in.Pow2K > 16 {
-		in.Pow2K = 16
+	if in.Pow2K > 64 {
+		in.Pow2K = 64
 	}
-	if in.MaxAttempts < 1 {
-		in.MaxAttempts = 1
+	if in.MaxAttempts < 0 {
+		in.MaxAttempts = 0
 	}
-	if in.MaxAttempts > 32 {
-		in.MaxAttempts = 32
+	if in.MaxAttempts > 256 {
+		in.MaxAttempts = 256
+	}
+	if in.SelectorMaxAttempts < 0 {
+		in.SelectorMaxAttempts = 0
+	}
+	if in.SelectorMaxAttempts > 256 {
+		in.SelectorMaxAttempts = 256
 	}
 	if in.StickyMax < 0 {
 		in.StickyMax = 0
 	}
-	if in.StickyMax > 1_000_000 {
-		in.StickyMax = 1_000_000
+	if in.StickyMax > 10_000_000 {
+		in.StickyMax = 10_000_000
 	}
 	if in.StickyTTLSec < 0 {
 		in.StickyTTLSec = 0
@@ -443,20 +449,29 @@ func (c *SettingsController) Apply(in RuntimeSettings) (RuntimeSettings, error) 
 	if in.RefreshWorkers < 0 {
 		in.RefreshWorkers = 0
 	}
-	if in.RefreshWorkers > 4 {
-		in.RefreshWorkers = 4
+	if in.RefreshWorkers > 256 {
+		in.RefreshWorkers = 256
 	}
 	if in.RefreshQPS < 0 {
 		in.RefreshQPS = 0
 	}
-	if in.RefreshQPS > 1000 {
-		in.RefreshQPS = 1000
+	if in.RefreshQPS > 100_000 {
+		in.RefreshQPS = 100_000
+	}
+	if in.RefreshSkewSec < 0 {
+		in.RefreshSkewSec = 0
 	}
 	if in.MaxBodyBytes < 0 {
 		in.MaxBodyBytes = 0
 	}
 	if in.RequestTimeoutSec < 0 {
 		in.RequestTimeoutSec = 0
+	}
+	if in.HotSize < 0 {
+		in.HotSize = 0
+	}
+	if in.HotSize > 5_000_000 {
+		in.HotSize = 5_000_000
 	}
 	// 与旧快照合并：空字段保留原值（全量表单 PUT 也会带齐；兼容部分字段）
 	prev := c.Snapshot().RuntimeSettings
@@ -542,28 +557,39 @@ func (c *SettingsController) Apply(in RuntimeSettings) (RuntimeSettings, error) 
 	in.AdminKey = ""
 	in.ImportSSOAPIKey = ""
 
-	// 导入数值边界：0=不限体积；>0 时硬顶 2GiB。
-	// 条目/并发/workers 给高上限，避免管理台「改了被钳回」像写死。
+	// 导入数值边界：0=不限体积；其余只设防崩溃上限。
 	if in.ImportMaxUploadBytes < 0 {
 		in.ImportMaxUploadBytes = 0
 	}
-	if in.ImportMaxUploadBytes > 2<<30 {
-		in.ImportMaxUploadBytes = 2 << 30
+	if in.ImportMaxUploadBytes > 8<<30 {
+		in.ImportMaxUploadBytes = 8 << 30
 	}
-	if in.ImportMaxEntries > 2_000_000 {
-		in.ImportMaxEntries = 2_000_000
+	if in.ImportMaxEntries > 10_000_000 {
+		in.ImportMaxEntries = 10_000_000
 	}
-	if in.ImportMaxConcurrentJobs > 64 {
-		in.ImportMaxConcurrentJobs = 64
+	if in.ImportMaxConcurrentJobs > 256 {
+		in.ImportMaxConcurrentJobs = 256
 	}
-	if in.ImportWorkers > 128 {
-		in.ImportWorkers = 128
+	if in.ImportWorkers > 512 {
+		in.ImportWorkers = 512
 	}
-	if in.ImportSSOMaxBatch > 500 {
-		in.ImportSSOMaxBatch = 500
+	if in.ImportSSOMaxBatch > 2000 {
+		in.ImportSSOMaxBatch = 2000
 	}
-	if in.ImportSSOWorkers > 128 {
-		in.ImportSSOWorkers = 128
+	if in.ImportSSOWorkers > 512 {
+		in.ImportSSOWorkers = 512
+	}
+	if in.ImportMaxNDJSONLineBytes > 64<<20 {
+		in.ImportMaxNDJSONLineBytes = 64 << 20
+	}
+	if in.ImportMaxSSOValueBytes > 1<<20 {
+		in.ImportMaxSSOValueBytes = 1 << 20
+	}
+	if in.ImportJobTimeoutSec > 7*24*3600 {
+		in.ImportJobTimeoutSec = 7 * 24 * 3600
+	}
+	if in.ImportSSOTimeoutSec > 3600 {
+		in.ImportSSOTimeoutSec = 3600
 	}
 
 	// 重启提示：仅真正无法热更的绑定项（端口 / 数据路径）。

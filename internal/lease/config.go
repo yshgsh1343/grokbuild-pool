@@ -110,8 +110,8 @@ func (c Config) normalize() Config {
 	if c.CooldownJitterPct < 0 {
 		c.CooldownJitterPct = d.CooldownJitterPct
 	}
-	if c.CooldownJitterPct > 50 {
-		c.CooldownJitterPct = 50
+	if c.CooldownJitterPct > 100 {
+		c.CooldownJitterPct = 100
 	}
 	if c.CooldownExpMax <= 0 {
 		c.CooldownExpMax = d.CooldownExpMax

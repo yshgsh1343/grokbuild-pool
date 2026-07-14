@@ -111,11 +111,27 @@ func (m *Manager) Config() Config {
 }
 
 // ApplyConfig 热更新冷却与失败切换参数。
+// 管理台路径：尊重显式 0（如关闭某项冷却），不再用 Default* 覆盖。
 func (m *Manager) ApplyConfig(cfg Config) {
 	if m == nil {
 		return
 	}
-	cfg = cfg.normalize()
+	// 仅安全下限：至少 1 次 attempt，避免 Acquire 空转
+	if cfg.MaxAttempts < 1 {
+		cfg.MaxAttempts = 1
+	}
+	if cfg.CooldownCapSec > 0 && cfg.CooldownBaseSec > 0 && cfg.CooldownCapSec < cfg.CooldownBaseSec {
+		cfg.CooldownCapSec = cfg.CooldownBaseSec
+	}
+	if cfg.CooldownJitterPct < 0 {
+		cfg.CooldownJitterPct = 0
+	}
+	if cfg.CooldownJitterPct > 100 {
+		cfg.CooldownJitterPct = 100
+	}
+	if cfg.ForbiddenQuarantineAfter < 0 {
+		cfg.ForbiddenQuarantineAfter = 0
+	}
 	m.mu.Lock()
 	m.cfg = cfg
 	m.mu.Unlock()

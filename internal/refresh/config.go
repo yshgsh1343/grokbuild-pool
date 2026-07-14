@@ -13,13 +13,13 @@ const (
 	DefaultCooldownOnFailSec  = 60
 	DefaultCooldownCapSec     = 900
 	DefaultQuarantineAfter    = 5 // 连续刷新失败次数
-	MinWorkers                = 2
-	MaxWorkers                = 4
+	MinWorkers                = 1
+	MaxWorkers                = 256
 )
 
 // Config 控制后台刷新 worker 与 EnsureFresh 行为。
 type Config struct {
-	// Workers 为后台池大小（钳制在 2–4；默认 3）。
+	// Workers 为后台池大小（1–256；默认 3）。
 	Workers int
 
 	// QPS 为全局刷新速率上限（默认 30/s）。
