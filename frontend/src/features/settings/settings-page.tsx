@@ -71,11 +71,7 @@ export function SettingsPage() {
             管理台不会自动重启服务；请在维护窗口手动重启容器/进程。
           </div>
         </div>
-      ) : (
-        <p className="text-xs text-muted-foreground">
-          持久化：{meta?.persisted_path || "（内存）"} · 密钥留空=不改 · 仅 listen / data_dir / db_path 需重启
-        </p>
-      )}
+      ) : null}
 
       <SettingsSection id="http" title="进程限制 / HTTP" note="全局并发、Body、超时立即生效">
         <NumField form={form} set={set} label="全局最大并发" k="max_concurrent" />

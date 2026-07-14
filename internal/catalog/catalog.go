@@ -993,17 +993,29 @@ WHERE id = ?`
 // ListAccounts 按 id 升序游标分页返回脱敏账号摘要。
 // 不 SELECT access_token/refresh_token 全文，仅用表达式生成 has_access/has_refresh 布尔。
 // AccountListFilter 账号列表筛选（管理台）。
+// 可用性 / 启用 / 测活 分列，避免塞进单一 status。
 type AccountListFilter struct {
-	// Status: ""|alive|dead|enabled|disabled|cooldown|quarantine|no_token
+	// Status: ""|alive|dead|cooldown|quarantine|no_token
+	// 兼容旧前端：enabled|disabled|probe_ok|probe_fail|unprobed 仍可写在 Status 上。
 	Status string
+	// Enabled: ""|enabled|disabled
+	Enabled string
+	// Probe: ""|ok|fail|unprobed（亦接受 probe_ok / probe_fail）
+	Probe string
 	// Lifecycle exact: active|quarantined|purged（可空）
 	Lifecycle string
 	// Query 匹配 id/email/name 子串（大小写不敏感）
 	Query string
+	// Sort: id|status|success_rate|quota（默认 id）
+	Sort string
+	// Order: asc|desc（默认：id=asc，其余=desc）
+	Order string
+	// Offset 非 id 排序或显式偏移时使用；与 afterID 互斥（优先 Offset）。
+	Offset int
 }
 
-// ListAccounts 按 id 升序游标分页返回脱敏账号摘要。
-// filter 可选；afterID 为上一页最后 id（首页空）。
+// ListAccounts 游标/偏移分页返回脱敏账号摘要。
+// filter 可选；afterID 为上一页最后 id（仅 Sort=id 时使用）。
 func (c *Catalog) ListAccounts(limit int, afterID string, filter AccountListFilter) ([]AccountSummary, error) {
 	if c.db == nil {
 		return nil, ErrClosed
@@ -1012,60 +1024,28 @@ func (c *Catalog) ListAccounts(limit int, afterID string, filter AccountListFilt
 		return nil, fmt.Errorf("%w: limit must be > 0", ErrInvalidInput)
 	}
 	now := time.Now().Unix()
-	where := []string{"(? = '' OR id > ?)"}
-	args := []any{afterID, afterID}
-
-	st := strings.ToLower(strings.TrimSpace(filter.Status))
-	switch st {
-	case "", "all":
-	case "alive":
-		// 基础可用，且（未测活 或 probe_ok=true）
-		where = append(where, "enabled = 1", "manual_disabled = 0", "lifecycle = ?", "cooldown_until <= ?",
-			"(access_token IS NOT NULL AND access_token != '' OR refresh_token IS NOT NULL AND refresh_token != '')",
-			`(billing_json IS NULL OR billing_json = ''
-			  OR json_extract(billing_json, '$.probe_ok') IS NULL
-			  OR json_extract(billing_json, '$.probe_ok') = 1)`)
-		args = append(args, LifecycleActive, now)
-	case "dead":
-		// 非存活：基础不可用，或已测活失败
-		where = append(where, `(enabled = 0 OR manual_disabled = 1 OR lifecycle != ? OR cooldown_until > ?
-			OR ((access_token IS NULL OR access_token = '') AND (refresh_token IS NULL OR refresh_token = ''))
-			OR json_extract(billing_json, '$.probe_ok') = 0)`)
-		args = append(args, LifecycleActive, now)
-	case "probe_ok":
-		where = append(where, "json_extract(billing_json, '$.probe_ok') = 1")
-	case "probe_fail", "probe_failed":
-		where = append(where, "json_extract(billing_json, '$.probe_ok') = 0")
-	case "unprobed":
-		where = append(where, `(billing_json IS NULL OR billing_json = ''
-			OR json_extract(billing_json, '$.probe_ok') IS NULL)`)
-	case "enabled":
-		where = append(where, "enabled = 1")
-	case "disabled":
-		where = append(where, "enabled = 0")
-	case "cooldown":
-		where = append(where, "cooldown_until > ?")
-		args = append(args, now)
-	case "quarantine", "quarantined":
-		where = append(where, "lifecycle = ?")
-		args = append(args, LifecycleQuarantined)
-	case "no_token":
-		where = append(where, "((access_token IS NULL OR access_token = '') AND (refresh_token IS NULL OR refresh_token = ''))")
-	default:
-		return nil, fmt.Errorf("%w: unknown status filter %q", ErrInvalidInput, filter.Status)
+	where, args, err := buildAccountListWhere(filter, now)
+	if err != nil {
+		return nil, err
 	}
 
-	if lc := strings.TrimSpace(filter.Lifecycle); lc != "" {
-		where = append(where, "lifecycle = ?")
-		args = append(args, lc)
-	}
-	if q := strings.TrimSpace(filter.Query); q != "" {
-		like := "%" + strings.ToLower(q) + "%"
-		where = append(where, "(LOWER(id) LIKE ? OR LOWER(COALESCE(email,'')) LIKE ? OR LOWER(COALESCE(name,'')) LIKE ?)")
-		args = append(args, like, like, like)
+	sortKey, orderSQL, useOffset := resolveAccountListSort(filter)
+	if useOffset || filter.Offset > 0 {
+		if filter.Offset < 0 {
+			filter.Offset = 0
+		}
+		args = append(args, limit, filter.Offset)
+	} else {
+		// id 游标：仅在 ASC 时用 id > cursor；DESC 用 id < cursor
+		if strings.EqualFold(orderSQL, "DESC") {
+			where = append([]string{"(? = '' OR id < ?)"}, where...)
+		} else {
+			where = append([]string{"(? = '' OR id > ?)"}, where...)
+		}
+		args = append([]any{afterID, afterID}, args...)
+		args = append(args, limit)
 	}
 
-	args = append(args, limit)
 	sqlStr := `
 SELECT
   id,
@@ -1090,8 +1070,14 @@ SELECT
   COALESCE(billing_json, '')
 FROM accounts
 WHERE ` + strings.Join(where, " AND ") + `
-ORDER BY id ASC
+ORDER BY ` + sortKey + ` ` + orderSQL + `, id ` + orderSQL
+	if useOffset || filter.Offset > 0 {
+		sqlStr += `
+LIMIT ? OFFSET ?`
+	} else {
+		sqlStr += `
 LIMIT ?`
+	}
 
 	rows, err := c.db.Query(sqlStr, args...)
 	if err != nil {
@@ -1125,9 +1111,7 @@ LIMIT ?`
 		s.HasRefresh = hasRef != 0
 		s.LastUsedAt = nullInt64Ptr(lastUsed)
 		s.LastSuccessAt = nullInt64Ptr(lastSuccess)
-		// billing / probe 先解析，alive 可参考 probe_ok
 		s.Billing = ParseAccountBillingView(billingJSON)
-		// alive：基础可用 + 若已测活则必须 probe_ok
 		baseAlive := s.Enabled && !s.ManualDisabled && s.Lifecycle == LifecycleActive &&
 			s.CooldownUntil <= now && (s.HasAccess || s.HasRefresh)
 		if !baseAlive {
@@ -1135,7 +1119,7 @@ LIMIT ?`
 		} else if s.Billing != nil && s.Billing.ProbeOK != nil {
 			s.Alive = *s.Billing.ProbeOK
 		} else {
-			s.Alive = true // 未测活：按冷存储启发式
+			s.Alive = true
 		}
 		total := s.SuccessCount + s.FailureCount
 		if total > 0 {
@@ -1160,9 +1144,49 @@ func (c *Catalog) CountAccountsFiltered(filter AccountListFilter) (int, error) {
 		return 0, ErrClosed
 	}
 	now := time.Now().Unix()
-	where := []string{"1=1"}
-	args := []any{}
+	where, args, err := buildAccountListWhere(filter, now)
+	if err != nil {
+		return 0, err
+	}
+	if len(where) == 0 {
+		where = []string{"1=1"}
+	}
+	var n int
+	err = c.db.QueryRow(`SELECT COUNT(*) FROM accounts WHERE `+strings.Join(where, " AND "), args...).Scan(&n)
+	if err != nil {
+		return 0, err
+	}
+	return n, nil
+}
+
+func buildAccountListWhere(filter AccountListFilter, now int64) (where []string, args []any, err error) {
+	// 兼容旧单一 status 枚举：拆到 Enabled / Probe。
 	st := strings.ToLower(strings.TrimSpace(filter.Status))
+	en := strings.ToLower(strings.TrimSpace(filter.Enabled))
+	pr := strings.ToLower(strings.TrimSpace(filter.Probe))
+	switch st {
+	case "enabled", "disabled":
+		if en == "" {
+			en = st
+		}
+		st = ""
+	case "probe_ok", "ok":
+		if pr == "" {
+			pr = "ok"
+		}
+		st = ""
+	case "probe_fail", "probe_failed", "fail":
+		if pr == "" {
+			pr = "fail"
+		}
+		st = ""
+	case "unprobed":
+		if pr == "" {
+			pr = "unprobed"
+		}
+		st = ""
+	}
+
 	switch st {
 	case "", "all":
 	case "alive":
@@ -1177,17 +1201,6 @@ func (c *Catalog) CountAccountsFiltered(filter AccountListFilter) (int, error) {
 			OR ((access_token IS NULL OR access_token = '') AND (refresh_token IS NULL OR refresh_token = ''))
 			OR json_extract(billing_json, '$.probe_ok') = 0)`)
 		args = append(args, LifecycleActive, now)
-	case "probe_ok":
-		where = append(where, "json_extract(billing_json, '$.probe_ok') = 1")
-	case "probe_fail", "probe_failed":
-		where = append(where, "json_extract(billing_json, '$.probe_ok') = 0")
-	case "unprobed":
-		where = append(where, `(billing_json IS NULL OR billing_json = ''
-			OR json_extract(billing_json, '$.probe_ok') IS NULL)`)
-	case "enabled":
-		where = append(where, "enabled = 1")
-	case "disabled":
-		where = append(where, "enabled = 0")
 	case "cooldown":
 		where = append(where, "cooldown_until > ?")
 		args = append(args, now)
@@ -1197,8 +1210,32 @@ func (c *Catalog) CountAccountsFiltered(filter AccountListFilter) (int, error) {
 	case "no_token":
 		where = append(where, "((access_token IS NULL OR access_token = '') AND (refresh_token IS NULL OR refresh_token = ''))")
 	default:
-		return 0, fmt.Errorf("%w: unknown status filter %q", ErrInvalidInput, filter.Status)
+		return nil, nil, fmt.Errorf("%w: unknown status filter %q", ErrInvalidInput, filter.Status)
 	}
+
+	switch en {
+	case "", "all":
+	case "enabled":
+		where = append(where, "enabled = 1", "manual_disabled = 0")
+	case "disabled":
+		where = append(where, "(enabled = 0 OR manual_disabled = 1)")
+	default:
+		return nil, nil, fmt.Errorf("%w: unknown enabled filter %q", ErrInvalidInput, filter.Enabled)
+	}
+
+	switch pr {
+	case "", "all":
+	case "ok", "probe_ok":
+		where = append(where, "json_extract(billing_json, '$.probe_ok') = 1")
+	case "fail", "probe_fail", "probe_failed":
+		where = append(where, "json_extract(billing_json, '$.probe_ok') = 0")
+	case "unprobed":
+		where = append(where, `(billing_json IS NULL OR billing_json = ''
+			OR json_extract(billing_json, '$.probe_ok') IS NULL)`)
+	default:
+		return nil, nil, fmt.Errorf("%w: unknown probe filter %q", ErrInvalidInput, filter.Probe)
+	}
+
 	if lc := strings.TrimSpace(filter.Lifecycle); lc != "" {
 		where = append(where, "lifecycle = ?")
 		args = append(args, lc)
@@ -1208,12 +1245,61 @@ func (c *Catalog) CountAccountsFiltered(filter AccountListFilter) (int, error) {
 		where = append(where, "(LOWER(id) LIKE ? OR LOWER(COALESCE(email,'')) LIKE ? OR LOWER(COALESCE(name,'')) LIKE ?)")
 		args = append(args, like, like, like)
 	}
-	var n int
-	err := c.db.QueryRow(`SELECT COUNT(*) FROM accounts WHERE `+strings.Join(where, " AND "), args...).Scan(&n)
-	if err != nil {
-		return 0, err
+	if len(where) == 0 {
+		where = []string{"1=1"}
 	}
-	return n, nil
+	return where, args, nil
+}
+
+// resolveAccountListSort 返回 ORDER BY 表达式与 ASC/DESC。
+// 非 id 排序强制走 OFFSET（返回 useOffset=true）。
+func resolveAccountListSort(filter AccountListFilter) (sortExpr, orderSQL string, useOffset bool) {
+	order := strings.ToLower(strings.TrimSpace(filter.Order))
+	sort := strings.ToLower(strings.TrimSpace(filter.Sort))
+	if sort == "" {
+		sort = "id"
+	}
+	switch sort {
+	case "status", "alive":
+		// 可用优先：enabled & active & 未冷却
+		sortExpr = `(CASE
+			WHEN enabled=1 AND manual_disabled=0 AND lifecycle='` + LifecycleActive + `' AND cooldown_until<=strftime('%s','now')
+			THEN 1 ELSE 0 END)`
+		useOffset = true
+		if order == "" {
+			order = "desc"
+		}
+	case "success_rate", "success":
+		sortExpr = `(CASE WHEN (success_count+failure_count)=0 THEN -1.0
+			ELSE CAST(success_count AS REAL)/(success_count+failure_count) END)`
+		useOffset = true
+		if order == "" {
+			order = "desc"
+		}
+	case "quota", "billing", "remain_quota":
+		// 剩余月额度（billing_json.monthly.monthlyLimit - used）；无快照排后
+		sortExpr = `(CASE
+			WHEN billing_json IS NULL OR billing_json='' THEN -1e18
+			ELSE COALESCE(json_extract(billing_json,'$.monthly.monthlyLimit'),0)
+			   - COALESCE(json_extract(billing_json,'$.monthly.used'),0)
+		END)`
+		useOffset = true
+		if order == "" {
+			order = "desc"
+		}
+	default: // id
+		sortExpr = "id"
+		useOffset = filter.Offset > 0
+		if order == "" {
+			order = "asc"
+		}
+	}
+	if order == "desc" {
+		orderSQL = "DESC"
+	} else {
+		orderSQL = "ASC"
+	}
+	return sortExpr, orderSQL, useOffset
 }
 
 // Stats 返回冷存储的聚合计数。

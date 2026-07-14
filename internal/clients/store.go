@@ -104,13 +104,12 @@ CREATE INDEX IF NOT EXISTS idx_tokens_enabled ON api_tokens(enabled);
 	if err != nil {
 		return err
 	}
-	// 旧库兼容：保留 key_plain 列，但新写入恒为空；并清空历史明文。
+	// 旧库兼容：确保 key_plain 列存在；新创建会写入明文供管理台再次查看。
 		_, _ = s.db.Exec(`ALTER TABLE api_tokens ADD COLUMN key_plain TEXT NOT NULL DEFAULT ''`)
-		_, _ = s.db.Exec(`UPDATE api_tokens SET key_plain='' WHERE key_plain != ''`)
 		return nil
 	}
 
-	// Create 发放一把或多把令牌；明文仅在此返回，不写入 key_plain。
+// Create 发放一把或多把令牌；明文写入 key_plain，并在响应中返回。
 // 指针字段 nil 按 0/false 落库；默认模板合并在 admin.CreateTokens 完成。
 // 显式传 0 表示「不限」，不会被默认值覆盖。
 func (s *Store) Create(req CreateRequest) ([]CreateResult, error) {
@@ -181,8 +180,8 @@ func (s *Store) Create(req CreateRequest) ([]CreateResult, error) {
 		_, err = tx.Exec(`INSERT INTO api_tokens(
 id,name,key_prefix,key_hash,key_plain,enabled,remain_quota,unlimited_quota,max_concurrent,rpm,
 used_quota,request_count,expires_at,created_at,updated_at,last_used_at
-) VALUES(?,?,?,?,'',1,?,?,?,?,0,0,?,?,?,0)`,
-			t.ID, t.Name, t.KeyPrefix, t.KeyHash, t.RemainQuota, boolInt(t.UnlimitedQuota),
+) VALUES(?,?,?,?,?,1,?,?,?,?,0,0,?,?,?,0)`,
+			t.ID, t.Name, t.KeyPrefix, t.KeyHash, plain, t.RemainQuota, boolInt(t.UnlimitedQuota),
 			t.MaxConcurrent, t.RPM, t.ExpiresAt, t.CreatedAt, t.UpdatedAt)
 		if err != nil {
 			return nil, fmt.Errorf("clients: insert: %w", err)
@@ -195,13 +194,13 @@ used_quota,request_count,expires_at,created_at,updated_at,last_used_at
 	return out, nil
 }
 
-// List 按创建时间倒序列出（不含明文密钥；仅 key_prefix 可供识别）。
+// List 按创建时间倒序列出（含 key_plain → api_key，供管理台查看/复制）。
 // Inflight 从进程内闸门填充，便于管理台展示「当前占用/上限」。
 func (s *Store) List(limit int) ([]Token, error) {
 	if limit <= 0 || limit > 500 {
 		limit = 100
 	}
-	rows, err := s.db.Query(`SELECT id,name,key_prefix,enabled,remain_quota,unlimited_quota,max_concurrent,rpm,
+	rows, err := s.db.Query(`SELECT id,name,key_prefix,COALESCE(key_plain,''),enabled,remain_quota,unlimited_quota,max_concurrent,rpm,
 used_quota,request_count,expires_at,created_at,updated_at,last_used_at
 FROM api_tokens ORDER BY created_at DESC LIMIT ?`, limit)
 	if err != nil {
@@ -212,13 +211,14 @@ FROM api_tokens ORDER BY created_at DESC LIMIT ?`, limit)
 	for rows.Next() {
 		var t Token
 		var en, unlim int
-		if err := rows.Scan(&t.ID, &t.Name, &t.KeyPrefix, &en, &t.RemainQuota, &unlim, &t.MaxConcurrent, &t.RPM,
+		var plain string
+		if err := rows.Scan(&t.ID, &t.Name, &t.KeyPrefix, &plain, &en, &t.RemainQuota, &unlim, &t.MaxConcurrent, &t.RPM,
 			&t.UsedQuota, &t.RequestCount, &t.ExpiresAt, &t.CreatedAt, &t.UpdatedAt, &t.LastUsedAt); err != nil {
 			return nil, err
 		}
 		t.Enabled = en != 0
 		t.UnlimitedQuota = unlim != 0
-		t.APIKey = "" // 永不从库回读明文
+		t.APIKey = plain
 		out = append(out, t)
 	}
 	if err := rows.Err(); err != nil {
@@ -677,9 +677,10 @@ FROM api_tokens`).Scan(&total, &enabled, &exhausted)
 func (s *Store) getByID(id string) (Token, error) {
 	var t Token
 	var en, unlim int
-	err := s.db.QueryRow(`SELECT id,name,key_prefix,enabled,remain_quota,unlimited_quota,max_concurrent,rpm,
+	var plain string
+	err := s.db.QueryRow(`SELECT id,name,key_prefix,COALESCE(key_plain,''),enabled,remain_quota,unlimited_quota,max_concurrent,rpm,
 used_quota,request_count,expires_at,created_at,updated_at,last_used_at FROM api_tokens WHERE id=?`, id).
-		Scan(&t.ID, &t.Name, &t.KeyPrefix, &en, &t.RemainQuota, &unlim, &t.MaxConcurrent, &t.RPM,
+		Scan(&t.ID, &t.Name, &t.KeyPrefix, &plain, &en, &t.RemainQuota, &unlim, &t.MaxConcurrent, &t.RPM,
 			&t.UsedQuota, &t.RequestCount, &t.ExpiresAt, &t.CreatedAt, &t.UpdatedAt, &t.LastUsedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Token{}, ErrNotFound
@@ -689,6 +690,7 @@ used_quota,request_count,expires_at,created_at,updated_at,last_used_at FROM api_
 	}
 	t.Enabled = en != 0
 	t.UnlimitedQuota = unlim != 0
+	t.APIKey = plain
 	return t, nil
 }
 

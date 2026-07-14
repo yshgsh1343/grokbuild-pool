@@ -82,9 +82,19 @@ export type AccountSummary = {
 export type AccountsListResponse = {
   accounts: AccountSummary[];
   next_cursor?: string;
+  has_more?: boolean;
   limit?: number;
+  offset?: number;
   total?: number;
-  filter?: { status?: string; lifecycle?: string; q?: string };
+  filter?: {
+    status?: string;
+    enabled?: string;
+    probe?: string;
+    lifecycle?: string;
+    q?: string;
+    sort?: string;
+    order?: string;
+  };
   stats?: {
     count?: number;
     enabled?: number;

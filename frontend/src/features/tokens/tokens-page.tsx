@@ -58,8 +58,8 @@ export function TokensPage() {
   const [unlimited, setUnlimited] = useState<boolean | null>(null);
   const [maxConcurrent, setMaxConcurrent] = useState<number | null>(null);
   const [rpm, setRpm] = useState<number | null>(null);
-  const [onceKeys, setOnceKeys] = useState<string[]>([]);
   const [expanded, setExpanded] = useState<string | null>(null);
+  const [revealed, setRevealed] = useState<Set<string>>(() => new Set());
   const [selected, setSelected] = useState<Set<string>>(() => new Set());
   const [deleteIds, setDeleteIds] = useState<string[] | null>(null);
   const [deleteConfirm, setDeleteConfirm] = useState("");
@@ -105,16 +105,15 @@ export function TokensPage() {
         if (res.api_key) keys.push(res.api_key);
         else if (res.plaintext) keys.push(res.plaintext);
       }
-      setOnceKeys(keys);
       if (keys.length) {
         try {
           await copyText(keys.join("\n"));
           toast.success(`已创建 ${keys.length} 把密钥，并复制到剪贴板`);
         } catch {
-          toast.success(`已创建 ${keys.length} 把密钥（复制失败，请手动复制）`);
+          toast.success(`已创建 ${keys.length} 把密钥（复制失败，请在列表中查看）`);
         }
       } else {
-        toast.success("已创建，但响应中未包含明文密钥");
+        toast.success("已创建");
       }
       void qc.invalidateQueries({ queryKey: ["tokens"] });
     },
@@ -189,10 +188,7 @@ export function TokensPage() {
 
   return (
     <div className="space-y-4">
-      <PageHeader
-        title="Token"
-        description="创建 / 编辑并发·RPM·额度 · 明文仅创建时显示一次 · PATCH 立即生效"
-      />
+      <PageHeader title="Token" />
 
       <div className="rounded-lg border border-border bg-card p-4">
         <div className="mb-3 text-sm font-medium">快速创建</div>
@@ -259,47 +255,7 @@ export function TokensPage() {
           </Button>
         </div>
 
-        {onceKeys.length > 0 ? (
-          <div className="mt-4 rounded-md border border-warning/30 bg-warning/5 p-3">
-            <div className="mb-2 flex items-center justify-between gap-2">
-              <p className="text-xs text-muted-foreground">
-                明文密钥仅显示一次（共 {onceKeys.length} 把），请立即复制：
-              </p>
-              <Button
-                size="sm"
-                variant="secondary"
-                onClick={() =>
-                  void copyText(onceKeys.join("\n"))
-                    .then(() => toast.success("已全部复制"))
-                    .catch(() => toast.error("复制失败"))
-                }
-              >
-                <Copy /> 全部复制
-              </Button>
-            </div>
-            <div className="space-y-1">
-              {onceKeys.map((k, i) => (
-                <div key={i} className="flex items-center gap-2">
-                  <code className="mono flex-1 break-all rounded bg-muted px-2 py-1">
-                    {k}
-                  </code>
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    onClick={() =>
-                      void copyText(k)
-                        .then(() => toast.success(`已复制第 ${i + 1} 把`))
-                        .catch(() => toast.error("复制失败"))
-                    }
-                  >
-                    <Copy />
-                  </Button>
-                </div>
-              ))}
-            </div>
-          </div>
-        ) : null}
-      </div>
+        </div>
 
       <DataTableShell
         toolbar={
@@ -365,6 +321,8 @@ export function TokensPage() {
             <TableBody>
               {tokens.map((t) => {
                 const open = expanded === t.id;
+                const keyShown = revealed.has(t.id);
+                const plain = t.api_key || "";
                 return (
                   <Fragment key={t.id}>
                     <TableRow>
@@ -393,7 +351,45 @@ export function TokensPage() {
                       </TableCell>
                       <TableCell className="mono">{t.id}</TableCell>
                       <TableCell>{t.name || "—"}</TableCell>
-                      <TableCell className="mono">{t.key_prefix || "—"}</TableCell>
+                      <TableCell className="mono">
+                        <div className="flex items-center gap-1">
+                          <span className="max-w-[180px] truncate" title={plain || t.key_prefix || ""}>
+                            {keyShown && plain ? plain : t.key_prefix || "—"}
+                          </span>
+                          {plain ? (
+                            <>
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                className="h-7 px-1.5 text-[11px]"
+                                onClick={() =>
+                                  setRevealed((prev) => {
+                                    const next = new Set(prev);
+                                    if (next.has(t.id)) next.delete(t.id);
+                                    else next.add(t.id);
+                                    return next;
+                                  })
+                                }
+                              >
+                                {keyShown ? "隐藏" : "显示"}
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                className="size-7"
+                                title="复制密钥"
+                                onClick={() =>
+                                  void copyText(plain)
+                                    .then(() => toast.success("已复制密钥"))
+                                    .catch(() => toast.error("复制失败"))
+                                }
+                              >
+                                <Copy />
+                              </Button>
+                            </>
+                          ) : null}
+                        </div>
+                      </TableCell>
                       <TableCell>
                         <Badge variant={t.enabled ? "success" : "outline"}>
                           {t.enabled ? "启用" : "禁用"}
@@ -450,6 +446,29 @@ export function TokensPage() {
                     {open ? (
                       <TableRow>
                         <TableCell colSpan={11} className="bg-muted/40">
+                          {plain ? (
+                            <div className="mb-3 flex flex-wrap items-center gap-2 px-2 pt-2">
+                              <span className="text-xs text-muted-foreground">密钥</span>
+                              <code className="mono flex-1 break-all rounded bg-muted px-2 py-1 text-xs">
+                                {plain}
+                              </code>
+                              <Button
+                                size="sm"
+                                variant="secondary"
+                                onClick={() =>
+                                  void copyText(plain)
+                                    .then(() => toast.success("已复制密钥"))
+                                    .catch(() => toast.error("复制失败"))
+                                }
+                              >
+                                <Copy /> 复制
+                              </Button>
+                            </div>
+                          ) : (
+                            <p className="px-2 pt-2 text-xs text-muted-foreground">
+                              该令牌创建于旧版本，库中无明文密钥；请删除后重建。
+                            </p>
+                          )}
                           <div className="grid gap-3 p-2 sm:grid-cols-2 lg:grid-cols-5">
                             <div className="space-y-1">
                               <Label>名称</Label>

@@ -59,9 +59,7 @@ export function DashboardPage() {
       <PageHeader
         title="仪表盘"
         description={
-          s
-            ? `更新于 ${new Date().toLocaleString("zh-CN")} · uptime ${Math.round(s.uptime_seconds ?? 0)}s · ${s.listen ?? ""} · ${s.version ?? ""}`
-            : "运行态与池容量一览"
+          s ? `更新于 ${new Date().toLocaleString("zh-CN")}` : undefined
         }
         actions={
           <Button

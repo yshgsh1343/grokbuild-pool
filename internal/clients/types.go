@@ -3,13 +3,13 @@ package clients
 import "time"
 
 // Token 客户端 API 密钥记录。
-// 鉴权以 key_hash 为准；明文仅在 Create 响应中返回一次，不再持久化/列表回读。
+// 鉴权以 key_hash 为准；key_plain 持久化以便管理台再次查看/复制（管理员接口返回）。
 type Token struct {
 	ID             string `json:"id"`
 	Name           string `json:"name"`
 	KeyPrefix      string `json:"key_prefix"` // 展示用前缀，如 sk-ab12…
 	KeyHash        string `json:"-"`
-	// APIKey 仅出现在 CreateResult；List 恒为空（兼容旧 JSON 字段名）。
+	// APIKey 明文密钥；Create / List / Get 在管理端均可能返回。
 	APIKey         string `json:"api_key,omitempty"`
 	Enabled        bool   `json:"enabled"`
 	RemainQuota    int64  `json:"remain_quota"` // 有限额度；与 UnlimitedQuota 联用
@@ -40,7 +40,7 @@ type CreateRequest struct {
 	Count          int    `json:"count"` // 批量数量，默认 1，最大 100
 }
 
-// CreateResult 返回元数据 + 一次性明文密钥。
+// CreateResult 返回元数据 + 明文密钥（亦已写入 key_plain，可再次从 List/Get 读取）。
 type CreateResult struct {
 	Token     Token  `json:"token"`
 	APIKey    string `json:"api_key"`

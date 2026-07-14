@@ -63,11 +63,7 @@ export function SchedulerPage() {
         <div className="rounded-md border border-warning/40 bg-warning/10 px-3 py-2 text-xs text-warning">
           {meta.restart_hint}
         </div>
-      ) : (
-        <p className="text-xs text-muted-foreground">
-          持久化：{meta?.persisted_path || "（内存）"} · 本页改动会整表保存当前表单
-        </p>
-      )}
+      ) : null}
 
       <div className="rounded-lg border border-border bg-card p-4 text-xs leading-relaxed text-muted-foreground">
         <div className="font-medium text-foreground">当前解释</div>

@@ -345,7 +345,7 @@ func (h *Handlers) PoolStats(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, out)
 }
 
-// ListTokens 列出令牌（不含明文；仅创建时返回一次 api_key）。
+// ListTokens 列出令牌（含 api_key 明文，供管理台查看/复制）。
 func (h *Handlers) ListTokens(w http.ResponseWriter, r *http.Request) {
 	if h.Tokens == nil {
 		writeErr(w, http.StatusServiceUnavailable, "令牌存储未启用")
@@ -362,7 +362,7 @@ func (h *Handlers) ListTokens(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"tokens": list})
 }
 
-// CreateTokens 快速创建/批量发放密钥（明文仅此响应返回一次）。
+// CreateTokens 快速创建/批量发放密钥（明文写入库，并可在 List/Get 再次读取）。
 // 指针字段语义：nil=未传 → 用默认模板；显式 0/false 保留，绝不被默认覆盖。
 func (h *Handlers) CreateTokens(w http.ResponseWriter, r *http.Request) {
 	if h.Tokens == nil {

@@ -116,9 +116,6 @@ export function JsonSettingsPage() {
           </>
         }
       />
-      <p className="text-xs text-muted-foreground">
-        持久化路径：{path || "（内存）"} · 只读展示字段（*_configured / restart_hint）保存时会剥离
-      </p>
       <Textarea
         value={text}
         onChange={(e) => setText(e.target.value)}

@@ -69,54 +69,68 @@ import {
 
 type Filters = {
   status: string;
+  enabled: string;
+  probe: string;
   lifecycle: string;
   q: string;
+  sort: string;
+  order: string;
+};
+
+const emptyFilters: Filters = {
+  status: "",
+  enabled: "",
+  probe: "",
+  lifecycle: "",
+  q: "",
+  sort: "id",
+  order: "asc",
 };
 
 function listAccounts(params: {
-  cursor: string;
+  offset: number;
   limit: number;
   filters: Filters;
 }) {
   const sp = new URLSearchParams();
   sp.set("limit", String(params.limit));
-  if (params.cursor) sp.set("cursor", params.cursor);
+  sp.set("offset", String(params.offset));
   if (params.filters.status) sp.set("status", params.filters.status);
+  if (params.filters.enabled) sp.set("enabled", params.filters.enabled);
+  if (params.filters.probe) sp.set("probe", params.filters.probe);
   if (params.filters.lifecycle) sp.set("lifecycle", params.filters.lifecycle);
   if (params.filters.q) sp.set("q", params.filters.q);
+  if (params.filters.sort) sp.set("sort", params.filters.sort);
+  if (params.filters.order) sp.set("order", params.filters.order);
   return api<AccountsListResponse>(`/admin/accounts?${sp.toString()}`);
 }
 
 export function AccountsPage() {
   const qc = useQueryClient();
   const [limit, setLimit] = useState(50);
-  const [cursor, setCursor] = useState("");
-  const [cursorStack, setCursorStack] = useState<string[]>([]);
   const [pageIndex, setPageIndex] = useState(1);
-  const [draft, setDraft] = useState<Filters>({ status: "", lifecycle: "", q: "" });
-  const [filters, setFilters] = useState<Filters>({ status: "", lifecycle: "", q: "" });
+  const [draft, setDraft] = useState<Filters>({ ...emptyFilters });
+  const [filters, setFilters] = useState<Filters>({ ...emptyFilters });
   const [selected, setSelected] = useState<Set<string>>(() => new Set());
   const [detail, setDetail] = useState<AccountSummary | null>(null);
   const [deleteIds, setDeleteIds] = useState<string[] | null>(null);
   const [deleteConfirm, setDeleteConfirm] = useState("");
 
+  const offset = (pageIndex - 1) * limit;
+
   const query = useQuery({
-    queryKey: ["accounts", cursor, limit, filters],
-    queryFn: () => listAccounts({ cursor, limit, filters }),
+    queryKey: ["accounts", offset, limit, filters],
+    queryFn: () => listAccounts({ offset, limit, filters }),
   });
 
   const accounts = query.data?.accounts ?? [];
   const total = query.data?.total ?? 0;
-  const nextCursor = query.data?.next_cursor ?? "";
-  const stats = query.data?.stats;
-  const page = query.data?.page;
+  const hasMore = !!query.data?.has_more || !!query.data?.next_cursor;
   const totalPages = total > 0 ? Math.max(1, Math.ceil(total / limit)) : 0;
-
-  const allChecked = accounts.length > 0 && accounts.every((a) => selected.has(a.id));
+  const allChecked =
+    accounts.length > 0 && accounts.every((a) => selected.has(a.id));
 
   function resetPager() {
-    setCursor("");
-    setCursorStack([]);
     setPageIndex(1);
     setSelected(new Set());
   }
@@ -127,17 +141,32 @@ export function AccountsPage() {
   }
 
   function resetFilters() {
-    const empty = { status: "", lifecycle: "", q: "" };
-    setDraft(empty);
-    setFilters(empty);
+    setDraft({ ...emptyFilters });
+    setFilters({ ...emptyFilters });
     resetPager();
+  }
+
+  function toggleSort(key: "status" | "success_rate" | "quota") {
+    const nextOrder =
+      filters.sort === key && filters.order === "desc" ? "asc" : "desc";
+    const next = { ...filters, sort: key, order: nextOrder };
+    setDraft((d) => ({ ...d, sort: key, order: nextOrder }));
+    setFilters(next);
+    resetPager();
+  }
+
+  function sortMark(key: string) {
+    if (filters.sort !== key) return "";
+    return filters.order === "asc" ? " ↑" : " ↓";
   }
 
   const batchMutation = useMutation({
     mutationFn: (body: { action: string; ids: string[] }) =>
       api<BatchResult>("/admin/accounts/batch", { method: "POST", body }),
     onSuccess: (res, vars) => {
-      toast.success(`${vars.action} 完成：ok ${res.ok ?? 0} · fail ${res.failed ?? 0}`);
+      toast.success(
+        `${vars.action} 完成：ok ${res.ok ?? 0} · fail ${res.failed ?? 0}`,
+      );
       setSelected(new Set());
       void qc.invalidateQueries({ queryKey: ["accounts"] });
     },
@@ -188,10 +217,13 @@ export function AccountsPage() {
     <div className="space-y-4">
       <PageHeader
         title="账号"
-        description="号池指标 · 额度/测活 · 存活/成功率 · 批量操作"
         actions={
           <>
-            <Button variant="secondary" size="sm" onClick={() => void exportAccounts()}>
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => void exportAccounts()}
+            >
               <Download /> 导出 JSON
             </Button>
             <Button
@@ -201,70 +233,70 @@ export function AccountsPage() {
               disabled={query.isFetching}
               aria-label="刷新"
             >
-              <RefreshCw className={query.isFetching ? "animate-spin" : undefined} />
+              <RefreshCw
+                className={query.isFetching ? "animate-spin" : undefined}
+              />
             </Button>
           </>
         }
       />
 
-      {stats ? (
-        <div className="flex flex-wrap gap-3 text-xs text-muted-foreground">
-          <span>
-            启用 <strong className="text-foreground">{stats.enabled ?? "—"}</strong>
-          </span>
-          <span>
-            活跃 <strong className="text-foreground">{stats.active ?? "—"}</strong>
-          </span>
-          <span>
-            冷却 <strong className="text-foreground">{stats.cooldown ?? "—"}</strong>
-          </span>
-          <span>
-            隔离 <strong className="text-foreground">{stats.quarantine ?? "—"}</strong>
-          </span>
-          <span>
-            禁用 <strong className="text-foreground">{stats.disabled ?? "—"}</strong>
-          </span>
-          {page ? (
-            <>
-              <span>
-                本页存活{" "}
-                <strong className="text-foreground">
-                  {page.alive ?? 0}/{page.count ?? 0}
-                </strong>
-              </span>
-              <span>
-                inflight <strong className="text-foreground">{page.inflight_sum ?? 0}</strong>
-              </span>
-              <span>
-                额度快照 <strong className="text-foreground">{page.with_billing ?? 0}</strong>
-              </span>
-            </>
-          ) : null}
-        </div>
-      ) : null}
-
       <div className="flex flex-wrap items-end gap-2 rounded-lg border border-border bg-card p-3">
         <div className="space-y-1">
-          <div className="text-[11px] text-muted-foreground">状态</div>
+          <div className="text-[11px] text-muted-foreground">可用</div>
           <Select
             value={draft.status || "__all"}
-            onValueChange={(v) => setDraft((d) => ({ ...d, status: v === "__all" ? "" : v }))}
+            onValueChange={(v) =>
+              setDraft((d) => ({ ...d, status: v === "__all" ? "" : v }))
+            }
           >
-            <SelectTrigger className="w-36">
+            <SelectTrigger className="w-32">
               <SelectValue placeholder="全部" />
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="__all">全部</SelectItem>
-              <SelectItem value="alive">存活</SelectItem>
+              <SelectItem value="alive">可用</SelectItem>
               <SelectItem value="dead">不可用</SelectItem>
-              <SelectItem value="probe_ok">测活OK</SelectItem>
-              <SelectItem value="probe_fail">测活失败</SelectItem>
-              <SelectItem value="unprobed">未测活</SelectItem>
-              <SelectItem value="enabled">启用</SelectItem>
-              <SelectItem value="disabled">禁用</SelectItem>
               <SelectItem value="cooldown">冷却</SelectItem>
               <SelectItem value="quarantine">隔离</SelectItem>
               <SelectItem value="no_token">无令牌</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+        <div className="space-y-1">
+          <div className="text-[11px] text-muted-foreground">启用</div>
+          <Select
+            value={draft.enabled || "__all"}
+            onValueChange={(v) =>
+              setDraft((d) => ({ ...d, enabled: v === "__all" ? "" : v }))
+            }
+          >
+            <SelectTrigger className="w-28">
+              <SelectValue placeholder="全部" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="__all">全部</SelectItem>
+              <SelectItem value="enabled">启用</SelectItem>
+              <SelectItem value="disabled">未启用</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+        <div className="space-y-1">
+          <div className="text-[11px] text-muted-foreground">测活</div>
+          <Select
+            value={draft.probe || "__all"}
+            onValueChange={(v) =>
+              setDraft((d) => ({ ...d, probe: v === "__all" ? "" : v }))
+            }
+          >
+            <SelectTrigger className="w-28">
+              <SelectValue placeholder="全部" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="__all">全部</SelectItem>
+              <SelectItem value="ok">测活OK</SelectItem>
+              <SelectItem value="fail">测活失败</SelectItem>
+              <SelectItem value="unprobed">未测活</SelectItem>
             </SelectContent>
           </Select>
         </div>
@@ -276,7 +308,7 @@ export function AccountsPage() {
               setDraft((d) => ({ ...d, lifecycle: v === "__all" ? "" : v }))
             }
           >
-            <SelectTrigger className="w-36">
+            <SelectTrigger className="w-32">
               <SelectValue placeholder="全部" />
             </SelectTrigger>
             <SelectContent>
@@ -284,6 +316,44 @@ export function AccountsPage() {
               <SelectItem value="active">active</SelectItem>
               <SelectItem value="quarantined">quarantined</SelectItem>
               <SelectItem value="purged">purged</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+        <div className="space-y-1">
+          <div className="text-[11px] text-muted-foreground">排序</div>
+          <Select
+            value={draft.sort || "id"}
+            onValueChange={(v) =>
+              setDraft((d) => ({
+                ...d,
+                sort: v,
+                order: v === "id" ? "asc" : "desc",
+              }))
+            }
+          >
+            <SelectTrigger className="w-32">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="id">ID</SelectItem>
+              <SelectItem value="status">状态</SelectItem>
+              <SelectItem value="success_rate">成功率</SelectItem>
+              <SelectItem value="quota">额度</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+        <div className="space-y-1">
+          <div className="text-[11px] text-muted-foreground">方向</div>
+          <Select
+            value={draft.order || "asc"}
+            onValueChange={(v) => setDraft((d) => ({ ...d, order: v }))}
+          >
+            <SelectTrigger className="w-24">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="asc">升序</SelectItem>
+              <SelectItem value="desc">降序</SelectItem>
             </SelectContent>
           </Select>
         </div>
@@ -316,9 +386,7 @@ export function AccountsPage() {
             <Button
               size="sm"
               variant="secondary"
-              onClick={() =>
-                setSelected(new Set(accounts.map((a) => a.id)))
-              }
+              onClick={() => setSelected(new Set(accounts.map((a) => a.id)))}
               disabled={!accounts.length}
             >
               全选本页
@@ -331,7 +399,9 @@ export function AccountsPage() {
             >
               清空
             </Button>
-            <span className="text-xs text-muted-foreground">已选 {selected.size}</span>
+            <span className="text-xs text-muted-foreground">
+              已选 {selected.size}
+            </span>
             <div className="flex-1" />
             <Button
               size="sm"
@@ -384,11 +454,11 @@ export function AccountsPage() {
                 resetPager();
               }}
             >
-              <SelectTrigger className="w-24">
+              <SelectTrigger className="w-28">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                {[20, 50, 100, 200].map((n) => (
+                {[20, 50, 100, 200, 500, 1000].map((n) => (
                   <SelectItem key={n} value={String(n)}>
                     {n}/页
                   </SelectItem>
@@ -405,18 +475,14 @@ export function AccountsPage() {
                 : `第 ${pageIndex} 页`}
               {total > 0 ? ` · 共 ${total} 账号` : ""}
               {` · 本页 ${accounts.length} 条`}
-              {nextCursor ? " · 有后续" : accounts.length > 0 ? " · 已到末页" : ""}
+              {hasMore ? " · 有后续" : accounts.length > 0 ? " · 已到末页" : ""}
             </span>
             <div className="flex gap-2">
               <Button
                 size="sm"
                 variant="secondary"
-                disabled={!cursorStack.length || query.isFetching}
+                disabled={pageIndex <= 1 || query.isFetching}
                 onClick={() => {
-                  const prev = [...cursorStack];
-                  const last = prev.pop() ?? "";
-                  setCursorStack(prev);
-                  setCursor(last);
                   setPageIndex((p) => Math.max(1, p - 1));
                   setSelected(new Set());
                 }}
@@ -426,10 +492,11 @@ export function AccountsPage() {
               <Button
                 size="sm"
                 variant="secondary"
-                disabled={!nextCursor || query.isFetching}
+                disabled={
+                  query.isFetching ||
+                  (totalPages > 0 ? pageIndex >= totalPages : !hasMore)
+                }
                 onClick={() => {
-                  setCursorStack((s) => [...s, cursor]);
-                  setCursor(nextCursor);
                   setPageIndex((p) => p + 1);
                   setSelected(new Set());
                 }}
@@ -471,111 +538,151 @@ export function AccountsPage() {
                     }}
                   />
                 </TableHead>
-                <TableHead>ID</TableHead>
+                <TableHead className="w-16">ID</TableHead>
                 <TableHead>邮箱</TableHead>
-                <TableHead>状态</TableHead>
-                <TableHead>成功率</TableHead>
-                <TableHead>并发</TableHead>
-                <TableHead>额度 / 测活</TableHead>
+                <TableHead>
+                  <button
+                    type="button"
+                    className="hover:underline"
+                    onClick={() => toggleSort("status")}
+                  >
+                    状态{sortMark("status")}
+                  </button>
+                </TableHead>
+                <TableHead>
+                  <button
+                    type="button"
+                    className="hover:underline"
+                    onClick={() => toggleSort("success_rate")}
+                  >
+                    成功率{sortMark("success_rate")}
+                  </button>
+                </TableHead>
+                <TableHead>
+                  <button
+                    type="button"
+                    className="hover:underline"
+                    onClick={() => toggleSort("quota")}
+                  >
+                    额度 / 测活{sortMark("quota")}
+                  </button>
+                </TableHead>
                 <TableHead>代理</TableHead>
                 <TableHead className="text-right">操作</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
-              {accounts.map((a) => (
-                <TableRow key={a.id} data-state={selected.has(a.id) ? "selected" : undefined}>
-                  <TableCell>
-                    <Checkbox
-                      checked={selected.has(a.id)}
-                      onCheckedChange={(v) => {
-                        setSelected((prev) => {
-                          const next = new Set(prev);
-                          if (v) next.add(a.id);
-                          else next.delete(a.id);
-                          return next;
-                        });
-                      }}
-                    />
-                  </TableCell>
-                  <TableCell>
-                    <button
-                      type="button"
-                      className="mono text-left hover:underline"
-                      onClick={() => setDetail(a)}
-                    >
-                      {a.id}
-                    </button>
-                  </TableCell>
-                  <TableCell
-                    className="max-w-[160px] truncate"
-                    title={a.email || a.name || a.id || ""}
+              {accounts.map((a, i) => {
+                const displayId = offset + i + 1;
+                return (
+                  <TableRow
+                    key={a.id}
+                    data-state={selected.has(a.id) ? "selected" : undefined}
                   >
-                    {displayEmail(a)}
-                  </TableCell>
-                  <TableCell>
-                    <StatusBadges a={a} />
-                  </TableCell>
-                  <TableCell>{formatPercent(a.success_rate ?? null)}</TableCell>
-                  <TableCell className="mono">{a.inflight ?? 0}</TableCell>
-                  <TableCell>
-                    <BillingCell a={a} />
-                  </TableCell>
-                  <TableCell className="mono max-w-[120px] truncate" title={a.proxy_url || "直连"}>
-                    {a.proxy_url || "直连"}
-                  </TableCell>
-                  <TableCell className="text-right">
-                    <div className="flex justify-end gap-1">
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        onClick={() => setDetail(a)}
-                        title="详情"
-                      >
-                        <MoreHorizontal />
-                      </Button>
-                      <Button
-                        size="sm"
-                        variant="secondary"
-                        disabled={probeMutation.isPending}
-                        onClick={() => probeMutation.mutate([a.id])}
-                      >
-                        测活
-                      </Button>
-                      {a.enabled === false || a.manual_disabled ? (
-                        <Button
-                          size="sm"
-                          variant="secondary"
-                          onClick={() =>
-                            batchMutation.mutate({ action: "enable", ids: [a.id] })
-                          }
-                        >
-                          启用
-                        </Button>
-                      ) : (
-                        <Button
-                          size="sm"
-                          variant="secondary"
-                          onClick={() =>
-                            batchMutation.mutate({ action: "disable", ids: [a.id] })
-                          }
-                        >
-                          禁用
-                        </Button>
-                      )}
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        onClick={() => {
-                          setDeleteConfirm("");
-                          setDeleteIds([a.id]);
+                    <TableCell>
+                      <Checkbox
+                        checked={selected.has(a.id)}
+                        onCheckedChange={(v) => {
+                          setSelected((prev) => {
+                            const next = new Set(prev);
+                            if (v) next.add(a.id);
+                            else next.delete(a.id);
+                            return next;
+                          });
                         }}
+                      />
+                    </TableCell>
+                    <TableCell>
+                      <button
+                        type="button"
+                        className="tabular-nums text-left hover:underline"
+                        title={a.id}
+                        onClick={() => setDetail(a)}
                       >
-                        <Trash2 className="text-destructive" />
-                      </Button>
-                    </div>
-                  </TableCell>
-                </TableRow>
-              ))}
+                        {displayId}
+                      </button>
+                    </TableCell>
+                    <TableCell
+                      className="max-w-[160px] truncate"
+                      title={a.email || a.name || a.id || ""}
+                    >
+                      {displayEmail(a)}
+                    </TableCell>
+                    <TableCell>
+                      <StatusBadges a={a} />
+                    </TableCell>
+                    <TableCell>
+                      {formatPercent(a.success_rate ?? null)}
+                    </TableCell>
+                    <TableCell>
+                      <BillingCell a={a} />
+                    </TableCell>
+                    <TableCell
+                      className="mono max-w-[120px] truncate"
+                      title={a.proxy_url || "直连"}
+                    >
+                      {a.proxy_url || "直连"}
+                    </TableCell>
+                    <TableCell className="text-right">
+                      <div className="flex justify-end gap-1">
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          onClick={() => setDetail(a)}
+                          title="详情"
+                        >
+                          <MoreHorizontal />
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="secondary"
+                          disabled={probeMutation.isPending}
+                          onClick={() => probeMutation.mutate([a.id])}
+                        >
+                          测活
+                        </Button>
+                        {a.enabled === false || a.manual_disabled ? (
+                          <Button
+                            size="sm"
+                            variant="secondary"
+                            onClick={() =>
+                              batchMutation.mutate({
+                                action: "enable",
+                                ids: [a.id],
+                              })
+                            }
+                          >
+                            启用
+                          </Button>
+                        ) : (
+                          <Button
+                            size="sm"
+                            variant="secondary"
+                            onClick={() =>
+                              batchMutation.mutate({
+                                action: "disable",
+                                ids: [a.id],
+                              })
+                            }
+                          >
+                            禁用
+                          </Button>
+                        )}
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          onClick={() => {
+                            setDeleteConfirm("");
+                            setDeleteIds([a.id]);
+                          }}
+                        >
+                          <Trash2 className="text-destructive" />
+                        </Button>
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                );
+              })}
             </TableBody>
           </Table>
         )}
@@ -644,18 +751,30 @@ function displayEmail(a: AccountSummary): string {
 function StatusBadges({ a }: { a: AccountSummary }) {
   return (
     <div className="flex flex-wrap gap-1">
-      <Badge variant={a.alive ? "success" : "danger"}>{a.alive ? "存活" : "不可用"}</Badge>
-      {a.billing?.probe_ok === true ? <Badge variant="success">测活OK</Badge> : null}
-      {a.billing?.probe_ok === false ? <Badge variant="danger">测活失败</Badge> : null}
-      {a.lifecycle === "quarantined" ? <Badge variant="warning">隔离</Badge> : null}
-      {a.lifecycle === "purged" ? <Badge variant="outline">已清理</Badge> : null}
+      <Badge variant={a.alive ? "success" : "danger"}>
+        {a.alive ? "可用" : "不可用"}
+      </Badge>
+      {a.billing?.probe_ok === true ? (
+        <Badge variant="success">测活OK</Badge>
+      ) : null}
+      {a.billing?.probe_ok === false ? (
+        <Badge variant="danger">测活失败</Badge>
+      ) : null}
+      {a.lifecycle === "quarantined" ? (
+        <Badge variant="warning">隔离</Badge>
+      ) : null}
+      {a.lifecycle === "purged" ? (
+        <Badge variant="outline">已清理</Badge>
+      ) : null}
       {a.enabled === false || a.manual_disabled ? (
-        <Badge variant="outline">禁用</Badge>
+        <Badge variant="outline">未启用</Badge>
       ) : (
         <Badge variant="default">启用</Badge>
       )}
       {(a.cooldown_remaining_sec ?? 0) > 0 ? (
-        <Badge variant="warning">冷却 {formatDuration(a.cooldown_remaining_sec)}</Badge>
+        <Badge variant="warning">
+          冷却 {formatDuration(a.cooldown_remaining_sec)}
+        </Badge>
       ) : null}
     </div>
   );
@@ -666,7 +785,9 @@ function BillingCell({ a }: { a: AccountSummary }) {
   if (!b) return <span className="text-muted-foreground">未测活</span>;
   const parts: string[] = [];
   if (b.monthly_used != null || b.monthly_limit != null) {
-    parts.push(`月 ${formatNumber(b.monthly_used ?? 0)}/${formatNumber(b.monthly_limit ?? 0)}`);
+    parts.push(
+      `月 ${formatNumber(b.monthly_used ?? 0)}/${formatNumber(b.monthly_limit ?? 0)}`,
+    );
   }
   if (b.weekly_usage_percent != null) {
     parts.push(`周 ${Number(b.weekly_usage_percent).toFixed(1)}%`);
@@ -717,7 +838,9 @@ function AccountDetailSheet({
               <div className="mb-2 text-xs font-medium">状态</div>
               <StatusBadges a={account} />
               {account.status_reason ? (
-                <p className="mt-2 text-xs text-muted-foreground">{account.status_reason}</p>
+                <p className="mt-2 text-xs text-muted-foreground">
+                  {account.status_reason}
+                </p>
               ) : null}
             </section>
             <section>
@@ -727,10 +850,10 @@ function AccountDetailSheet({
                 <dd>{account.priority ?? 0}</dd>
                 <dt className="text-muted-foreground">成功率</dt>
                 <dd>{formatPercent(account.success_rate ?? null)}</dd>
-                <dt className="text-muted-foreground">并发</dt>
-                <dd className="mono">{account.inflight ?? 0}</dd>
                 <dt className="text-muted-foreground">代理</dt>
-                <dd className="mono break-all">{account.proxy_url || "直连"}</dd>
+                <dd className="mono break-all">
+                  {account.proxy_url || "直连"}
+                </dd>
                 <dt className="text-muted-foreground">last_error</dt>
                 <dd className="break-all">{account.last_error || "—"}</dd>
               </dl>
@@ -747,7 +870,9 @@ function AccountDetailSheet({
                 </div>
               ) : coolQ.isError ? (
                 <p className="text-xs text-destructive">
-                  {coolQ.error instanceof Error ? coolQ.error.message : "加载失败"}
+                  {coolQ.error instanceof Error
+                    ? coolQ.error.message
+                    : "加载失败"}
                 </p>
               ) : !(coolQ.data?.model_cooldowns ?? []).length ? (
                 <p className="text-xs text-muted-foreground">当前无模型冷却</p>
@@ -762,7 +887,9 @@ function AccountDetailSheet({
                       <div className="mt-0.5 text-[11px] text-muted-foreground">
                         剩余 {formatDuration(r.remaining_sec)}
                         {r.last_error ? ` · ${r.last_error}` : ""}
-                        {r.cooldown_until ? ` · until ${formatUnix(r.cooldown_until)}` : ""}
+                        {r.cooldown_until
+                          ? ` · until ${formatUnix(r.cooldown_until)}`
+                          : ""}
                       </div>
                     </li>
                   ))}

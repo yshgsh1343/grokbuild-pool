@@ -21,8 +21,8 @@ type AccountHot interface {
 	DemoteMany(ids []string)
 }
 
-// ListAccounts GET /admin/accounts?cursor=&limit=
-// 游标分页返回脱敏账号摘要（无 token 明文）；附 total/stats 便于页码展示。
+// ListAccounts GET /admin/accounts?cursor=&limit=&offset=&status=&enabled=&probe=&lifecycle=&q=&sort=&order=
+// 分页返回脱敏账号摘要（无上游 token 明文）；附 total/stats 便于页码展示。
 func (h *Handlers) ListAccounts(w http.ResponseWriter, r *http.Request) {
 	if h.Catalog == nil {
 		writeErr(w, http.StatusServiceUnavailable, "账号目录未启用")
@@ -35,16 +35,30 @@ func (h *Handlers) ListAccounts(w http.ResponseWriter, r *http.Request) {
 			writeErr(w, http.StatusBadRequest, "limit 无效")
 			return
 		}
-		if n > 200 {
-			n = 200
+		if n > 1000 {
+			n = 1000
 		}
 		limit = n
 	}
 	cursor := strings.TrimSpace(r.URL.Query().Get("cursor"))
+	offset := 0
+	if v := strings.TrimSpace(r.URL.Query().Get("offset")); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil || n < 0 {
+			writeErr(w, http.StatusBadRequest, "offset 无效")
+			return
+		}
+		offset = n
+	}
 	filter := catalog.AccountListFilter{
 		Status:    strings.TrimSpace(r.URL.Query().Get("status")),
+		Enabled:   strings.TrimSpace(r.URL.Query().Get("enabled")),
+		Probe:     strings.TrimSpace(r.URL.Query().Get("probe")),
 		Lifecycle: strings.TrimSpace(r.URL.Query().Get("lifecycle")),
 		Query:     strings.TrimSpace(r.URL.Query().Get("q")),
+		Sort:      strings.TrimSpace(r.URL.Query().Get("sort")),
+		Order:     strings.TrimSpace(r.URL.Query().Get("order")),
+		Offset:    offset,
 	}
 
 	// 多取 1 条判断是否有下一页
@@ -58,7 +72,9 @@ func (h *Handlers) ListAccounts(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	nextCursor := ""
+	hasMore := false
 	if len(rows) > limit {
+		hasMore = true
 		nextCursor = rows[limit-1].ID
 		rows = rows[:limit]
 	}
@@ -92,12 +108,18 @@ func (h *Handlers) ListAccounts(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"accounts":    rows,
 		"next_cursor": nextCursor,
+		"has_more":    hasMore,
 		"limit":       limit,
+		"offset":      offset,
 		"total":       total,
 		"filter": map[string]any{
 			"status":    filter.Status,
+			"enabled":   filter.Enabled,
+			"probe":     filter.Probe,
 			"lifecycle": filter.Lifecycle,
 			"q":         filter.Query,
+			"sort":      filter.Sort,
+			"order":     filter.Order,
 		},
 		"stats": map[string]any{
 			"count":      stats.Count,
@@ -108,10 +130,10 @@ func (h *Handlers) ListAccounts(w http.ResponseWriter, r *http.Request) {
 			"disabled":   stats.DisabledCount,
 		},
 		"page": map[string]any{
-			"alive":         aliveN,
-			"with_billing":  billingN,
-			"inflight_sum":  inflightSum,
-			"count":         len(rows),
+			"alive":        aliveN,
+			"with_billing": billingN,
+			"inflight_sum": inflightSum,
+			"count":        len(rows),
 		},
 	})
 }
