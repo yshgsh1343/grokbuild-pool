@@ -17,6 +17,7 @@ build-scheme2:
 	CGO_ENABLED=0 $(GO) build -trimpath -ldflags="-s -w" -o $(BIN)/worker ./cmd/worker
 	CGO_ENABLED=0 $(GO) build -trimpath -ldflags="-s -w" -o $(BIN)/controlplane ./cmd/controlplane
 	CGO_ENABLED=0 $(GO) build -trimpath -ldflags="-s -w" -o $(BIN)/refresher ./cmd/refresher
+	CGO_ENABLED=0 $(GO) build -trimpath -ldflags="-s -w" -o $(BIN)/seed-sqlite ./cmd/seed-sqlite
 
 test:
 	$(GO) test ./...

@@ -145,7 +145,7 @@ func (s *Server) pickWorker(ctx context.Context, stickyKey string, attempt int) 
 	if len(s.cfg.WorkerBaseURLs) == 0 {
 		return "", "", errors.New("no worker urls configured")
 	}
-	// sticky worker preference
+	// 1) sticky worker preference
 	if stickyKey != "" && s.state != nil && attempt == 0 {
 		if b, e := s.state.GetSticky(ctx, stickyKey); e == nil && b.WorkerID != "" {
 			if u, ok := s.workerURLByID(b.WorkerID); ok {
@@ -153,11 +153,24 @@ func (s *Server) pickWorker(ctx context.Context, stickyKey string, attempt int) 
 			}
 		}
 	}
-	// hash sticky/attempt into worker slot
+	// 2) shard-owner routing: hash → shard → current lease owner
 	seed := stickyKey
 	if seed == "" {
 		seed = fmt.Sprintf("attempt-%d", attempt)
 	}
+	if s.state != nil && s.cfg.ShardCount > 0 {
+		shard := hashString(seed) % s.cfg.ShardCount
+		// on retry, rotate shard to avoid dead owner
+		if attempt > 0 {
+			shard = (shard + attempt) % s.cfg.ShardCount
+		}
+		if lease, e := s.state.GetShardOwner(ctx, shard); e == nil && lease.WorkerID != "" {
+			if u, ok := s.workerURLByID(lease.WorkerID); ok {
+				return u, lease.WorkerID, nil
+			}
+		}
+	}
+	// 3) fallback: static worker list hash
 	idx := hashString(seed+fmt.Sprint(attempt)) % len(s.cfg.WorkerBaseURLs)
 	return s.cfg.WorkerBaseURLs[idx], fmt.Sprintf("worker-%d", idx), nil
 }

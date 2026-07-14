@@ -35,6 +35,15 @@ func NewRedis(addr string) (*Redis, error) {
 	return &Redis{rdb: rdb}, nil
 }
 
+// NewRedisFromClient wraps an existing go-redis client (tests / custom pools).
+// Caller owns Close via Redis.Close.
+func NewRedisFromClient(rdb *redis.Client) (*Redis, error) {
+	if rdb == nil {
+		return nil, fmt.Errorf("clusterstate: nil redis client")
+	}
+	return &Redis{rdb: rdb}, nil
+}
+
 func (r *Redis) Close() error {
 	if r == nil || r.rdb == nil {
 		return nil
