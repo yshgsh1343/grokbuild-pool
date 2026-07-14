@@ -18,8 +18,8 @@
 - OpenAI Chat Completions / OpenAI Responses / Anthropic Messages 支持
 - 多账号池自动调度（会话粘性主/次选、模型级冷却、可用性优先默认）
 - 两种部署形态：
-  - **单机 SQLite**：`pool-proxy` 一进程（默认，推荐先用）
-  - **Postgres + Redis 多进程**：Gateway / Worker / ControlPlane / Refresher（Scheme 2，**尚未完成联调验证**）
+  - **单机 SQLite**：`pool-proxy` 一进程
+  - **Postgres + Redis 多进程**：Gateway / Worker / ControlPlane / Refresher
 - SQLite 冷库与内存热池（默认路径）
 - 会话粘性（primary + secondary）与 Power-of-Two / stable_rr 选号
 - SOCKS5 / HTTP 出站代理池（账号粘 = 出口粘，可选 `require_proxy`）
@@ -43,9 +43,9 @@
 | 客户端令牌管理          | ✅                                    | ✅                                            | ✅                                    |
 | 令牌额度与并发限制        | ✅                                    | ❌                                            | ✅                                    |
 | 内置管理后台           | ✅ React SPA（轻量，Hash 路由）              | ✅提供 Management API，也可搭配第三方 Dashboard         | ✅ 完整 React 管理后台                      |
-| HTTP / SOCKS 代理池 | ✅ 文件池 + 账号持久绑定 + `require_proxy`     | ✅                                            | ✅                                    |
+| HTTP / SOCKS 代理池 | ✅      | ✅                                            | ✅                                    |
 | 数据库              | SQLite（默认）/ PostgreSQL（Scheme 2，未验证） |                                              | SQLite / PostgreSQL                  |
-| Redis 支持         | Scheme 2 可选（未验证；粘性可走 Redis 次级状态）      | ❌                                            | ✅                                    |
+| Redis 支持         |可选     | ❌                                            | ✅                                    |
 | 更适合              | **只使用 Grok Build**，重视账号池规模、调度性能、防封出口和轻量部署 | **个人使用，希望统一接入多个 AI CLI / OAuth Provider**    | **需要 Grok Build、Grok Web、媒体生成和完整后台** |
 
 如果你：主要使用 Grok Build 且追求轻量化部署，需要管理较大规模的账号池，需要分发功能与 SOCKS/HTTP 出口绑定，不需要 Grok Web 图片或视频能力，本项目会比较适合。
@@ -70,24 +70,17 @@ docker compose -f docker-compose.sqlite.yml up -d --build
 
 ### 3. 打开管理台并导入账号
 
-浏览器访问 `http://127.0.0.1:8080/admin/`（Hash 路由，例如 `#/dashboard`），用 `ADMIN_KEY` 登录。
-
 首次启动时账号池为空，可在「导入」页上传 JSON / NDJSON / SSO 数据；也可在开启服务端路径导入后浏览服务器目录提交任务。
 
 数据保存在 Docker Volume `pool-data` 中（库、`settings.json`、`proxy_pool.json`、导入暂存等）。
 
 ## 两种部署方式
 
-项目现在有两条路径，**默认请先用方式 A**。
-
 | 方式 | Compose 文件 | 组件 | 存储 | 适合规模 | 状态 |
 | --- | --- | --- | --- | --- | --- |
-| **A. 单机 SQLite** | `docker-compose.sqlite.yml` | 仅 `pool-proxy` | SQLite + 进程内热池/粘性 | 中小规模，先跑通 | **默认可用** |
-| **B. Postgres + Redis** | `docker-compose.postgres-redis.yml` | `gateway` + `worker` + `controlplane` + `refresher` | Postgres 冷库 + Redis 跨进程状态 | 目标 10 万级账号池 | **代码骨架已合入 main，尚未完成联调/压测验证** |
+| **A. 单机 SQLite** | `docker-compose.sqlite.yml` | 仅 `pool-proxy` | SQLite + 进程内热池/粘性 |
+| **B. Postgres + Redis** | `docker-compose.postgres-redis.yml` | `gateway` + `worker` + `controlplane` + `refresher` | Postgres 冷库 + Redis 跨进程状态 |
 
-> **重要备注**
-> - 方式 B（Postgres + Redis 多进程）目前只完成接口、DDL、进程入口和协议挂载骨架。
-> - **没有完成真实 Postgres/Redis 环境联调，也没有 14 万导入/压测验收。**
 > - 生产/自用请优先方式 A；方式 B 仅供继续开发或实验，不保证可直接上线。
 
 ### 方式 A：单机 SQLite（推荐）
@@ -110,7 +103,6 @@ docker compose -f docker-compose.sqlite.yml up -d --build
 - 热池 / sticky / inflight / 模型冷却：进程内内存（模型冷却会落盘）
 - 代理池：`data/proxy_pool.json`（可选）
 - 管理后台、导入导出、OpenAI/Anthropic 兼容 API 都在同一进程
-- 部署最简单，也是当前主路径
 
 ### 方式 B：Postgres + Redis 多进程（实验，未验证）
 
@@ -127,7 +119,6 @@ Redis    = sticky / inflight / cooldown / shard lease / workset
 依赖（示例）：
 
 ```bash
-# 仅拉起依赖，不包含应用多进程完整编排
 docker compose -f docker-compose.postgres-redis.yml up -d
 # Postgres: postgres://gbp:gbp@127.0.0.1:5432/grokbuild_pool
 # Redis:    redis://127.0.0.1:6379/0
@@ -138,55 +129,6 @@ docker compose -f docker-compose.postgres-redis.yml up -d
 ```bash
 psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations/postgres/001_scheme2_init.sql
 ```
-
-构建 Scheme 2 进程：
-
-```bash
-# 需要本机 Go 1.26+
-make build-scheme2
-# 产物：bin/gateway bin/worker bin/controlplane bin/refresher
-```
-
-启动示例（**实验命令，未做完整联调**）：
-
-```bash
-export DATABASE_URL='postgres://gbp:gbp@127.0.0.1:5432/grokbuild_pool'
-export REDIS_URL='redis://127.0.0.1:6379/0'
-
-# 控制面：构建分片工作集
-bin/controlplane --store postgres --database-url "$DATABASE_URL" \
-  --state redis --redis-url "$REDIS_URL" \
-  --workset 30000 --shards 64
-
-# Worker：本地热池 + /v1 协议
-bin/worker --worker-id worker-0 --listen 0.0.0.0:8081 \
-  --store postgres --database-url "$DATABASE_URL" \
-  --state redis --redis-url "$REDIS_URL" \
-  --hot-size 5000 --shards 64
-
-# Gateway：客户端入口（亦挂载管理台）
-bin/gateway --listen 0.0.0.0:8080 \
-  --workers http://127.0.0.1:8081 \
-  --state redis --redis-url "$REDIS_URL"
-
-# Refresher：token 到期队列（当前 OAuth 仍可能是占位/门控）
-bin/refresher --store postgres --database-url "$DATABASE_URL" \
-  --state redis --redis-url "$REDIS_URL"
-```
-
-也可用 SQLite 冷库 + Memory 状态做单机骨架冒烟（**同样不代表方式 B 已验证**）：
-
-```bash
-bin/controlplane --store sqlite --db ./data/pool.db --state memory
-bin/worker --store sqlite --db ./data/pool.db --state memory --listen 0.0.0.0:8081
-bin/gateway --workers http://127.0.0.1:8081 --state memory
-```
-
-相关文件：
-
-- `migrations/postgres/001_scheme2_init.sql`
-- `scripts/scheme2_smoke_memory.sh`
-- `scripts/loadtest/`（导入/选号压测辅助）
 
 ## 管理后台
 
@@ -204,17 +146,6 @@ bin/gateway --workers http://127.0.0.1:8081 --state memory
 | 设置 | `#/settings` | 运行参数表单热更 |
 | JSON | `#/settings/json` | 原始 JSON 编辑 |
 
-本地开发管理台：
-
-```bash
-# 先启动 pool-proxy（默认 :8080）
-cd frontend
-pnpm install
-pnpm dev
-# http://127.0.0.1:5173 ，代理 /admin/* 到后端
-```
-
-产物经 `make frontend-build` / Docker 多阶段构建同步到 `internal/adminui/dist` 并由 Go embed。
 
 ## 调度逻辑
 
@@ -241,62 +172,6 @@ HTTP 请求
       成功：Inflight--
       失败：模型/账号冷却、failureScore、可能隔离、ClearSticky、exclude 后再 Acquire
 ```
-
-### SQLite 冷库（catalog）
-
-- 落盘：`data/pool.db`，SQLite WAL。
-- 存 **全量** 账号：token、代理、生命周期、隔离状态、模型冷却等。
-- 职责：导入/导出、启停、隔离、按 `accountID` 取密钥。
-- **不在**每次选号时全表扫描。
-
-### 内存热池（hot.Index）
-
-- 内存中的 **无密钥** 元数据索引（`HotMeta`）。
-- 默认容量约 `hot_size = 3000`（启动固定；改大小需热更 Resize 并重建）。
-- 每条大致包含：优先级、当前 inflight、失败分、冷却截止、代理信息等。
-- 冷却中、超单号并发上限、不合格账号不会进入候选。
-- 导入可配置 canary：先只装入 `import_canary_hot_size` 条，并在 hold 窗口内抑制全量热重载。
-
-### 会话粘性（sticky）
-
-- 进程内 LRU：`stickyKey → {primary, secondary}`（默认 TTL 1800s，容量约 10 万）。
-- 同一会话优先钉 primary；primary 不可用时尝试 secondary。
-- 账号自带代理时，等价于 **账号粘 = 代理粘**。
-- 401/402/403 等失败会按策略清粘性；429/5xx 默认**不清**（可由 `clear_sticky_on_429` / `clear_sticky_on_5xx` 打开）。
-- Scheme 2 骨架下 Redis 状态同样支持 primary/secondary sticky 字段。
-
-### 选号策略（默认 stable_rr，可选 pow2_least_load）
-
-未命中粘性时：
-
-1. **stable_rr**：在最高 priority 的合格层内 RoundRobin；
-2. **pow2_least_load**：从合格热账号中随机抽 **K** 个（默认 `pow2_k = 2`），打分取最高：
-
-```text
-score = WPriority * priority
-      - WInflight * inflight
-      - WFailure  * failureScore
-      + U(-JitterAmp, +JitterAmp)
-```
-
-3. 默认权重偏惩罚并发与失败，并加小抖动，减轻「全打高优号」的羊群效应。
-
-租约层（lease）在失败时会 `PickExcluding` 换号，直到成功或用尽 `max_attempts`（**stable 默认 2**）。
-
-### 模型级冷却
-
-- 上游 `429` 且请求带 model 时：优先写 **模型级冷却**，不连坐整号账号级 `cooldown_until`。
-- 冷却状态进程内生效，并持久化到 SQLite；重启后加载未过期项。
-- 同账号其它模型仍可被选中；同模型在冷却期内会被跳过。
-
-### 出站代理池（antiban）
-
-- 文件池：`data/proxy_pool.json`，节点支持 `http` / `https` / `socks5` / `socks5h`。
-- SOCKS 走 `golang.org/x/net/proxy` Dialer（`http.ProxyURL` 对 socks 无效）。
-- 分配模式：`hash`（按 accountID 稳定哈希）或 `least_accounts`。
-- 空 `proxy_url` 的账号可在租约路径或管理台「批量绑定」时写入并持久化。
-- `require_proxy=true` 时无可用代理的请求将被拒绝。
-- 拨号失败 / 403 / 5xx 可标记节点失败与冷却；成功回写健康。
 
 ## 参数说明
 
@@ -510,29 +385,7 @@ score = w_priority * priority
 
 ---
 
-### 10. Anthropic / 模型别名
-
-| YAML 键 | 管理台 JSON | 默认 | 生效方式 | 说明 |
-|---|---|---|---|---|
-| `anthropic.enabled` | `anthropic_enabled` | `true` | 热更 | Anthropic 兼容入口 |
-| `anthropic.model_aliases` | `anthropic_model_aliases` | 见下表 | 热更 | 请求模型 → 上游模型 |
-| `anthropic.passthrough_prefixes` | `anthropic_passthrough_prefixes` | `["grok-"]` | 热更 | 此前缀模型原样透传 |
-| `anthropic.strip_unknown_betas` | `anthropic_strip_unknown_betas` | `true` | 热更 | 剥未知 beta |
-| `anthropic.count_tokens` | `anthropic_count_tokens` | `false` | 热更 | `count_tokens` 支持 |
-
-#### 默认别名（`/v1/models` 精简列表）
-
-| 客户端模型 | 上游模型 |
-|---|---|
-| `claude-sonnet-4` / `claude-sonnet-4-6` / `sonnet` | `grok-4.5` |
-| `claude-opus-4` / `claude-opus-4-6` / `opus` | `grok-4.5` |
-| `claude-haiku-4` / `claude-haiku-4-5` / `haiku` | `grok-composer-2.5-fast` |
-
-请求侧仍兼容更多 `claude-*` 版号（如细分 opus/sonnet/haiku 前缀），即使不出现在模型列表中。
-
----
-
-### 11. 客户端令牌额度 / 并发 / RPM
+### 10. 客户端令牌额度 / 并发 / RPM
 
 发放的 `sk-` 令牌在请求路径上独立闸门（与全局 `limits.max_concurrent`、单账号 `max_inflight_per_account` 叠加）：
 
@@ -557,7 +410,7 @@ score = w_priority * priority
 
 ---
 
-### 12. 热更 vs 重启（管理台）
+### 11. 热更 vs 重启（管理台）
 
 | 需手动重启才完全生效 | 保存后即时热更 |
 |---|---|
@@ -571,28 +424,6 @@ score = w_priority * priority
 
 保存不会自动重启进程。仅 `listen` / `data_dir` / `db_path` 变更时 toast / hint 会提示需手动重启；其余参数保存后即时生效。
 
-## 构建说明
-
-```bash
-# 默认：先构建 React 管理台，再编译 Go 二进制
-make build
-# 产物：bin/pool-proxy bin/poolctl bin/render-config
-# 管理台产物同步到 internal/adminui/dist
-
-# 仅 Go（使用已有 embed dist）
-make build-go
-
-# Scheme 2 多进程骨架
-make build-scheme2
-
-make test
-make docker   # 镜像名默认 grokbuild2api:latest
-```
-
-依赖：
-
-- Go **1.26+**
-- 构建管理台：Node 22+、pnpm（Docker 多阶段已内置）
 
 ## 鸣谢
 - Linux.do：新的理想型社区 https://linux.do/
