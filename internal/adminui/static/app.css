@@ -1894,3 +1894,94 @@ button[aria-busy="true"] {
     width: 100%;
   }
 }
+
+
+/* ========== Account detail drawer ========== */
+.account-detail-root {
+  position: fixed;
+  inset: 0;
+  z-index: 280;
+  display: flex;
+  justify-content: flex-end;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.18s ease;
+}
+.account-detail-root.is-open {
+  opacity: 1;
+  pointer-events: auto;
+}
+.account-detail-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgb(0 0 0 / 36%);
+  backdrop-filter: blur(1.5px);
+}
+.account-detail-panel {
+  position: relative;
+  z-index: 1;
+  width: min(440px, 100%);
+  height: 100%;
+  background: var(--color-bg-surface);
+  color: var(--color-text-primary);
+  border-left: 1px solid var(--color-border-default);
+  box-shadow: var(--shadow-overlay);
+  display: flex;
+  flex-direction: column;
+  transform: translateX(12px);
+  transition: transform 0.18s ease;
+}
+.account-detail-root.is-open .account-detail-panel {
+  transform: translateX(0);
+}
+.account-detail-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 16px 16px 10px;
+  border-bottom: 1px solid var(--color-border-default);
+}
+.account-detail-title {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 650;
+  line-height: 1.35;
+  word-break: break-all;
+}
+.account-detail-sub {
+  margin-top: 4px;
+  font-size: 12px;
+  color: var(--color-text-secondary);
+}
+.account-detail-body {
+  padding: 14px 16px 24px;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.account-detail-section-title {
+  font-size: 12px;
+  font-weight: 650;
+  letter-spacing: 0.02em;
+  color: var(--color-text-secondary);
+  margin-bottom: 6px;
+}
+.account-detail-kv {
+  display: grid;
+  grid-template-columns: 96px 1fr;
+  gap: 6px 10px;
+  font-size: 13px;
+}
+.account-detail-kv .k { color: var(--color-text-secondary); }
+.account-detail-kv .v { word-break: break-word; }
+.account-detail-list { display: flex; flex-direction: column; gap: 8px; }
+.account-detail-item {
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-sm);
+  padding: 10px 12px;
+  background: var(--color-bg-subtle, transparent);
+}
+.account-detail-item .title { font-weight: 600; font-size: 13px; }
+.account-detail-item .meta { margin-top: 4px; font-size: 12px; color: var(--color-text-secondary); }

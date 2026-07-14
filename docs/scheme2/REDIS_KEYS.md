@@ -19,7 +19,7 @@ Never store `access_token` / `refresh_token` in Redis.
 ```text
 gbp:sticky:{stickyKey} -> JSON
 {
-  "account_id": "...",
+  "account_id / secondary_account_id": "...",
   "worker_id": "...",
   "shard_id": 12,
   "exp": 1710000000
@@ -140,3 +140,16 @@ Workers XADD; flusher batches into Postgres.
 - `gbp:token:*` with raw credentials
 - permanent keys without TTL for inflight/locks
 - using Redis as only durability for account lifecycle
+
+
+## Sticky binding fields
+
+```json
+{
+  "account_id": "primary",
+  "secondary_account_id": "secondary-optional",
+  "worker_id": "worker-0",
+  "shard_id": 0,
+  "exp": 1710000000
+}
+```

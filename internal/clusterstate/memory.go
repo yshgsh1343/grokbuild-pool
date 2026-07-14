@@ -98,7 +98,7 @@ func (m *Memory) ClearStickyAccount(ctx context.Context, accountID string) error
 		return err
 	}
 	for k, v := range m.sticky {
-		if v.AccountID == accountID {
+		if v.AccountID == accountID || v.SecondaryAccountID == accountID {
 			delete(m.sticky, k)
 		}
 	}

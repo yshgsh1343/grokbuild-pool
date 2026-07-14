@@ -350,26 +350,15 @@ function loadAccounts(opts) {
         if (!id) return;
 
         if (act === "detail") {
-          withButtonLoading(btn, function () {
-            return api("/admin/accounts/" + encodeURIComponent(id) + "/model-cooldowns").then(function (res) {
-              var rows = (res && res.model_cooldowns) || [];
-              if (!rows.length) {
-                toast("账号 " + id + " 当前无模型冷却", "success");
-                return;
-              }
-              var lines = rows.map(function (r) {
-                var left = r.remaining_sec != null ? r.remaining_sec : 0;
-                var unit = left < 60 ? (left + "s") : (left < 3600 ? (Math.ceil(left/60) + "m") : (Math.ceil(left/3600) + "h"));
-                return (r.model || "?") + " · 剩余 " + unit + (r.last_error ? (" · " + r.last_error) : "");
-              });
-              toast("模型冷却 " + id + "：
-" + lines.join("
-"), "warning");
-            }).catch(function (e) {
-              if (handleAuthError(e)) return;
-              toast(e.message || "加载模型冷却失败", "danger");
-            });
-          }, { loadingText: "加载…" });
+          var row = null;
+          try {
+            var cached = state.accLastList || [];
+            for (var i = 0; i < cached.length; i++) {
+              if (cached[i] && cached[i].id === id) { row = cached[i]; break; }
+            }
+          } catch (_) {}
+          if (!row) row = { id: id };
+          openAccountDetail(row);
           return;
         }
         if (act === "probe") {
@@ -470,6 +459,89 @@ function loadAccounts(opts) {
     toast(hadTable ? "刷新失败，当前显示的可能是旧数据" : (e.message || "加载失败"), "danger");
     updateAccSelUI();
     updateAccPagerUI(hadTable ? null : 0);
+  });
+}
+
+
+var accountDetailRoot = null;
+
+function closeAccountDetail() {
+  if (!accountDetailRoot) return;
+  accountDetailRoot.classList.remove("is-open");
+  var root = accountDetailRoot;
+  accountDetailRoot = null;
+  document.body.classList.remove("dialog-open");
+  setTimeout(function () {
+    if (root && root.parentNode) root.parentNode.removeChild(root);
+  }, 180);
+}
+
+function openAccountDetail(account) {
+  if (!account || !account.id) return;
+  closeAccountDetail();
+  var root = document.createElement("div");
+  root.className = "account-detail-root";
+  root.innerHTML =
+    '<div class="account-detail-backdrop" data-close="1"></div>' +
+    '<aside class="account-detail-panel" role="dialog" aria-modal="true" aria-label="账号详情">' +
+    '<div class="account-detail-head">' +
+    '<div><h2 class="account-detail-title mono"></h2><div class="account-detail-sub"></div></div>' +
+    '<button type="button" class="btn btn--icon btn--ghost" data-close="1" aria-label="关闭">×</button>' +
+    '</div>' +
+    '<div class="account-detail-body"></div>' +
+    '</aside>';
+  document.body.appendChild(root);
+  document.body.classList.add("dialog-open");
+  accountDetailRoot = root;
+  root.querySelector(".account-detail-title").textContent = account.id;
+  root.querySelector(".account-detail-sub").textContent = (account.email || "—") + " · " + (account.lifecycle || "—");
+  var body = root.querySelector(".account-detail-body");
+  body.innerHTML =
+    '<div><div class="account-detail-section-title">状态</div>' + accountStatusBadges(account) +
+    (account.status_reason ? '<div class="muted" style="margin-top:8px">' + esc(account.status_reason) + '</div>' : '') +
+    '</div>' +
+    '<div><div class="account-detail-section-title">基础信息</div><div class="account-detail-kv">' +
+    '<div class="k">优先级</div><div class="v">' + esc(String(account.priority != null ? account.priority : 0)) + '</div>' +
+    '<div class="k">成功率</div><div class="v">' + formatSuccessRate(account) + '</div>' +
+    '<div class="k">并发</div><div class="v">' + formatInflight(account) + '</div>' +
+    '<div class="k">代理</div><div class="v mono">' + esc(account.proxy_url || "直连") + '</div>' +
+    '<div class="k">last_error</div><div class="v">' + esc(account.last_error || "—") + '</div>' +
+    '</div></div>' +
+    '<div><div class="account-detail-section-title">额度 / 测活</div>' + formatBilling(account) + '</div>' +
+    '<div><div class="account-detail-section-title">模型冷却</div><div class="account-detail-list" id="accModelCoolList"><div class="muted">加载中…</div></div></div>';
+
+  root.addEventListener("click", function (e) {
+    var el = e.target;
+    if (el && el.getAttribute && el.getAttribute("data-close") === "1") closeAccountDetail();
+  });
+  document.addEventListener("keydown", function onEsc(e) {
+    if (e.key === "Escape") {
+      document.removeEventListener("keydown", onEsc, true);
+      closeAccountDetail();
+    }
+  }, true);
+  requestAnimationFrame(function () { root.classList.add("is-open"); });
+
+  api("/admin/accounts/" + encodeURIComponent(account.id) + "/model-cooldowns").then(function (res) {
+    var list = root.querySelector("#accModelCoolList");
+    if (!list) return;
+    var rows = (res && res.model_cooldowns) || [];
+    if (!rows.length) {
+      list.innerHTML = '<div class="muted">当前无模型冷却</div>';
+      return;
+    }
+    list.innerHTML = rows.map(function (r) {
+      var left = Number(r.remaining_sec || 0);
+      var unit = left < 60 ? (left + "s") : (left < 3600 ? (Math.ceil(left / 60) + "m") : (Math.ceil(left / 3600) + "h"));
+      return '<div class="account-detail-item"><div class="title mono">' + esc(r.model || "?") +
+        '</div><div class="meta">剩余 ' + esc(unit) +
+        (r.last_error ? (" · " + esc(r.last_error)) : "") +
+        (r.cooldown_until ? (" · until " + esc(fmtUnix(r.cooldown_until))) : "") +
+        '</div></div>';
+    }).join("");
+  }).catch(function (e) {
+    var list = root.querySelector("#accModelCoolList");
+    if (list) list.innerHTML = '<div class="err-box">加载失败：' + esc(e.message || "unknown") + '</div>';
   });
 }
 

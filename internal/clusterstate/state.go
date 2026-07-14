@@ -16,18 +16,19 @@ var (
 
 // StickyBinding routes a conversation/session to an account+worker.
 type StickyBinding struct {
-	AccountID string `json:"account_id"`
-	WorkerID  string `json:"worker_id"`
-	ShardID   int    `json:"shard_id"`
-	Exp       int64  `json:"exp"`
+	AccountID          string `json:"account_id"`
+	SecondaryAccountID string `json:"secondary_account_id,omitempty"`
+	WorkerID           string `json:"worker_id"`
+	ShardID            int    `json:"shard_id"`
+	Exp                int64  `json:"exp"`
 }
 
 // ShardLease is the runtime owner of a shard.
 type ShardLease struct {
-	ShardID   int    `json:"shard_id"`
-	WorkerID  string `json:"worker_id"`
-	Version   int64  `json:"version"`
-	Exp       int64  `json:"exp"`
+	ShardID  int    `json:"shard_id"`
+	WorkerID string `json:"worker_id"`
+	Version  int64  `json:"version"`
+	Exp      int64  `json:"exp"`
 }
 
 // State is the Redis-shaped coordination API used by gateway/worker/refresher.

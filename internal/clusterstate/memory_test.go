@@ -62,11 +62,11 @@ func TestMemoryShardLease(t *testing.T) {
 func TestMemoryStickyAndWorkset(t *testing.T) {
 	m := clusterstate.NewMemory()
 	ctx := context.Background()
-	if err := m.PutSticky(ctx, "s1", clusterstate.StickyBinding{AccountID: "a1", WorkerID: "w0", ShardID: 3}, time.Minute); err != nil {
+	if err := m.PutSticky(ctx, "s1", clusterstate.StickyBinding{AccountID: "a1", SecondaryAccountID: "a2", WorkerID: "w0", ShardID: 3}, time.Minute); err != nil {
 		t.Fatal(err)
 	}
 	b, err := m.GetSticky(ctx, "s1")
-	if err != nil || b.AccountID != "a1" {
+	if err != nil || b.AccountID != "a1" || b.SecondaryAccountID != "a2" {
 		t.Fatalf("sticky: %+v err=%v", b, err)
 	}
 	if err := m.ReplaceWorkset(ctx, 3, []string{"a1", "a2"}, []float64{10, 9}); err != nil {

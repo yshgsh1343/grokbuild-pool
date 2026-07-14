@@ -62,6 +62,17 @@ func (m *storeLeaser) AcquireAttempt(ctx context.Context, stickyKey, model strin
 		tried = map[string]struct{}{}
 	}
 	now := time.Now().Unix()
+	// 跨进程 sticky 水合：共享态 primary/secondary 写入本地 sticky
+	if stickyKey != "" && m.state != nil {
+		if b, err := m.state.GetSticky(ctx, stickyKey); err == nil {
+			if b.AccountID != "" {
+				m.sel.BindSticky(stickyKey, b.AccountID)
+			}
+			if b.SecondaryAccountID != "" && b.SecondaryAccountID != b.AccountID {
+				m.sel.BindStickySecondary(stickyKey, b.SecondaryAccountID)
+			}
+		}
+	}
 	id, ok := m.sel.PickExcluding(now, stickyKey, tried)
 	if !ok || id == "" {
 		return lease.Lease{}, lease.ErrNoAccount
@@ -122,11 +133,24 @@ func (m *storeLeaser) Release(ctx context.Context, l lease.Lease, result lease.R
 		}
 	}
 	if result.Success {
-		if l.StickyKey != "" && m.state != nil {
-			_ = m.state.PutSticky(ctx, l.StickyKey, clusterstate.StickyBinding{
-				AccountID: l.AccountID,
-				Exp:       time.Now().Add(30 * time.Minute).Unix(),
-			}, 30*time.Minute)
+		if l.StickyKey != "" {
+			// 本地 sticky：成功号做 primary
+			m.sel.BindSticky(l.StickyKey, l.AccountID)
+			// 跨进程：带上 secondary（若本地已有）
+			if m.state != nil {
+				sec := ""
+				if _, s2, ok := m.sel.StickyPair(l.StickyKey); ok {
+					sec = s2
+					if sec == l.AccountID {
+						sec = ""
+					}
+				}
+				_ = m.state.PutSticky(ctx, l.StickyKey, clusterstate.StickyBinding{
+					AccountID:          l.AccountID,
+					SecondaryAccountID: sec,
+					Exp:                time.Now().Add(30 * time.Minute).Unix(),
+				}, 30*time.Minute)
+			}
 		}
 		return nil
 	}

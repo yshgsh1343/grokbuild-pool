@@ -51,14 +51,14 @@ func (r *Redis) Close() error {
 	return r.rdb.Close()
 }
 
-func stickyKey(k string) string          { return "gbp:sticky:" + k }
+func stickyKey(k string) string              { return "gbp:sticky:" + k }
 func stickyByAccKey(accountID string) string { return "gbp:sticky:byacc:" + accountID }
-func inflightKey(id string) string       { return "gbp:inflight:" + id }
-func cooldownKey(id string) string       { return "gbp:cooldown:" + id }
-func shardLeaseKey(id int) string        { return fmt.Sprintf("gbp:shard:lease:%d", id) }
-func worksetKey(id int) string           { return fmt.Sprintf("gbp:workset:shard:%d", id) }
-func refreshDueKey() string              { return "gbp:refresh:due" }
-func refreshLockKey(id string) string    { return "gbp:refresh:lock:" + id }
+func inflightKey(id string) string           { return "gbp:inflight:" + id }
+func cooldownKey(id string) string           { return "gbp:cooldown:" + id }
+func shardLeaseKey(id int) string            { return fmt.Sprintf("gbp:shard:lease:%d", id) }
+func worksetKey(id int) string               { return fmt.Sprintf("gbp:workset:shard:%d", id) }
+func refreshDueKey() string                  { return "gbp:refresh:due" }
+func refreshLockKey(id string) string        { return "gbp:refresh:lock:" + id }
 
 func (r *Redis) GetSticky(ctx context.Context, stickyKeyStr string) (StickyBinding, error) {
 	raw, err := r.rdb.Get(ctx, stickyKey(stickyKeyStr)).Bytes()
@@ -92,14 +92,23 @@ func (r *Redis) PutSticky(ctx context.Context, stickyKeyStr string, b StickyBind
 		pipe.SAdd(ctx, stickyByAccKey(b.AccountID), stickyKeyStr)
 		pipe.Expire(ctx, stickyByAccKey(b.AccountID), ttl+time.Hour)
 	}
+	if b.SecondaryAccountID != "" && b.SecondaryAccountID != b.AccountID {
+		pipe.SAdd(ctx, stickyByAccKey(b.SecondaryAccountID), stickyKeyStr)
+		pipe.Expire(ctx, stickyByAccKey(b.SecondaryAccountID), ttl+time.Hour)
+	}
 	_, err = pipe.Exec(ctx)
 	return err
 }
 
 func (r *Redis) ClearSticky(ctx context.Context, stickyKeyStr string) error {
 	// best-effort: read binding to drop reverse index
-	if b, err := r.GetSticky(ctx, stickyKeyStr); err == nil && b.AccountID != "" {
-		_ = r.rdb.SRem(ctx, stickyByAccKey(b.AccountID), stickyKeyStr).Err()
+	if b, err := r.GetSticky(ctx, stickyKeyStr); err == nil {
+		if b.AccountID != "" {
+			_ = r.rdb.SRem(ctx, stickyByAccKey(b.AccountID), stickyKeyStr).Err()
+		}
+		if b.SecondaryAccountID != "" {
+			_ = r.rdb.SRem(ctx, stickyByAccKey(b.SecondaryAccountID), stickyKeyStr).Err()
+		}
 	}
 	return r.rdb.Del(ctx, stickyKey(stickyKeyStr)).Err()
 }

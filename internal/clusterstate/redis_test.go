@@ -33,11 +33,11 @@ func TestRedisStickyInflightCooldown(t *testing.T) {
 	st, _ := newTestRedis(t)
 	ctx := context.Background()
 
-	if err := st.PutSticky(ctx, "s1", clusterstate.StickyBinding{AccountID: "a1", WorkerID: "worker-0", ShardID: 3}, time.Minute); err != nil {
+	if err := st.PutSticky(ctx, "s1", clusterstate.StickyBinding{AccountID: "a1", SecondaryAccountID: "a2", WorkerID: "worker-0", ShardID: 3}, time.Minute); err != nil {
 		t.Fatal(err)
 	}
 	b, err := st.GetSticky(ctx, "s1")
-	if err != nil || b.AccountID != "a1" || b.WorkerID != "worker-0" {
+	if err != nil || b.AccountID != "a1" || b.SecondaryAccountID != "a2" || b.WorkerID != "worker-0" {
 		t.Fatalf("sticky=%+v err=%v", b, err)
 	}
 
