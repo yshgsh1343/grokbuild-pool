@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httputil"
 	"net/url"
+	"strings"
 	"sync/atomic"
 	"time"
 
@@ -52,21 +53,30 @@ func (c Config) normalize() Config {
 
 // Server is a thin reverse proxy entry.
 type Server struct {
-	cfg   Config
-	state clusterstate.State
-	inflight atomic.Int64
-	client *http.Client
+	cfg           Config
+	state         clusterstate.State
+	inflight      atomic.Int64
+	maxConcurrent int64 // live limit; hot-updated via admin settings
+	client        *http.Client
+
+	// admin console (optional)
+	adminEnabled bool
+	settings     *settingsStore
+	startedAt    time.Time
 }
 
 func New(cfg Config, state clusterstate.State) *Server {
 	cfg = cfg.normalize()
-	return &Server{
+	s := &Server{
 		cfg:   cfg,
 		state: state,
 		client: &http.Client{
 			Timeout: cfg.RequestTimeout,
 		},
+		startedAt: time.Now(),
 	}
+	atomic.StoreInt64(&s.maxConcurrent, cfg.MaxConcurrent)
+	return s
 }
 
 func (s *Server) Handler() http.Handler {
@@ -84,7 +94,11 @@ func (s *Server) Handler() http.Handler {
 		_, _ = w.Write([]byte("ready"))
 	})
 	mux.HandleFunc("/v1/", s.proxyAPI)
-	mux.HandleFunc("/admin/scheme2/status", s.adminStatus)
+	// legacy status path without admin console
+	if !s.adminEnabled {
+		mux.HandleFunc("/admin/scheme2/status", s.adminStatus)
+	}
+	s.mountAdmin(mux)
 	return mux
 }
 
@@ -96,7 +110,8 @@ func (s *Server) proxyAPI(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	if n := s.inflight.Add(1); n > s.cfg.MaxConcurrent {
+	limit := s.currentMaxConcurrent()
+	if n := s.inflight.Add(1); limit > 0 && n > limit {
 		s.inflight.Add(-1)
 		w.Header().Set("Retry-After", "1")
 		http.Error(w, "gateway overloaded", http.StatusServiceUnavailable)
@@ -188,15 +203,27 @@ func (s *Server) workerURLByID(workerID string) (string, bool) {
 }
 
 func (s *Server) adminStatus(w http.ResponseWriter, r *http.Request) {
-	if s.cfg.AdminKey != "" && r.Header.Get("X-Admin-Key") != s.cfg.AdminKey {
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
-		return
+	want := strings.TrimSpace(s.cfg.AdminKey)
+	if s.settings != nil {
+		if k := s.settings.peekAdminKey(); k != "" {
+			want = k
+		}
+	}
+	if want != "" {
+		got := r.Header.Get("X-Admin-Key")
+		if got == "" {
+			got = extractAdminKey(r)
+		}
+		if !constantTimeKeyEq(got, want) {
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
 	}
 	_ = json.NewEncoder(w).Encode(map[string]any{
 		"component":      "gateway",
 		"workers":        len(s.cfg.WorkerBaseURLs),
 		"inflight":       s.inflight.Load(),
-		"max_concurrent": s.cfg.MaxConcurrent,
+		"max_concurrent": s.currentMaxConcurrent(),
 		"shard_count":    s.cfg.ShardCount,
 	})
 }

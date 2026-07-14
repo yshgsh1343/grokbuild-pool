@@ -303,6 +303,14 @@ func (h *Handlers) PoolStats(w http.ResponseWriter, r *http.Request) {
 		"hot_cap":           hotCap,
 		"max_concurrent":    h.Config.Limits.MaxConcurrent,
 	}
+	// 热更新后以 settings 为准（启动时 Config 快照不会跟着变）
+	if h.Settings != nil {
+		snap := h.Settings.Snapshot().RuntimeSettings
+		out["max_concurrent"] = snap.MaxConcurrent
+		if snap.Listen != "" {
+			out["listen"] = snap.Listen
+		}
+	}
 	// P1：refresh / quarantine
 	if x, ok := h.Metrics.(interface {
 		RefreshOK() int64
@@ -582,7 +590,15 @@ func (h *Handlers) SafeConfig(w http.ResponseWriter, r *http.Request) {
 		"note": "可热更新参数见 GET/PUT /admin/settings",
 	}
 	if h.Settings != nil {
-		out["runtime"] = h.Settings.Snapshot()
+		snap := h.Settings.Snapshot()
+		out["runtime"] = snap
+		out["max_concurrent"] = snap.MaxConcurrent
+		if snap.Listen != "" {
+			out["listen"] = snap.Listen
+		}
+		if snap.HotSize > 0 {
+			out["hot_size"] = snap.HotSize
+		}
 	}
 	writeJSON(w, http.StatusOK, out)
 }

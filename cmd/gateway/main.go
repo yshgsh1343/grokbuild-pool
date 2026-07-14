@@ -22,6 +22,7 @@ func main() {
 	apiKey := flag.String("api-key", os.Getenv("API_KEY"), "optional static API key")
 	adminKey := flag.String("admin-key", os.Getenv("ADMIN_KEY"), "admin key for status")
 	maxConcurrent := flag.Int64("max-concurrent", 2000, "global concurrent requests")
+	dataDir := flag.String("data-dir", envOr("GATEWAY_DATA_DIR", "./data-gateway"), "gateway admin settings dir")
 	stateBackend := flag.String("state", envOr("SCHEME2_STATE", "memory"), "cluster state backend: memory|redis")
 	redisURL := flag.String("redis-url", envOr("REDIS_URL", ""), "redis url when state=redis")
 	flag.Parse()
@@ -40,6 +41,9 @@ func main() {
 		AdminKey:       *adminKey,
 	}
 	srv := gateway.New(cfg, state)
+	// A 风格管理台：静态 UI + settings/pool stats；max_concurrent 保存后即时热更
+	srv.EnableAdminConsole(*dataDir)
+	log.Printf("gateway admin console enabled data_dir=%s", *dataDir)
 	httpSrv := &http.Server{Addr: cfg.Listen, Handler: srv.Handler()}
 	go func() {
 		log.Printf("gateway listening on %s workers=%v", cfg.Listen, cfg.WorkerBaseURLs)

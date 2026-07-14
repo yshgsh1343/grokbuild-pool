@@ -111,6 +111,17 @@ func (m *Middleware) SetMaxConcurrent(n int) {
 	m.limiter.setLimit(n)
 }
 
+// MaxConcurrentLimit 返回当前全局并发上限（0=不限）。
+func (m *Middleware) MaxConcurrentLimit() int {
+	if m == nil {
+		return 0
+	}
+	m.ensureRuntime()
+	m.limiter.mu.Lock()
+	defer m.limiter.mu.Unlock()
+	return m.limiter.limit
+}
+
 // SetMaxBody 热更新请求体上限。0 表示不由公共中间件限制。
 func (m *Middleware) SetMaxBody(n int64) {
 	if m == nil {
