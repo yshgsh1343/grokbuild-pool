@@ -25,6 +25,7 @@ hot_size: 3000
 
 # stable | balanced | aggressive
 availability_mode: stable
+# 导入 canary（管理台可热更 import_canary_hot_size / hold_sec；0=导入后全量进热池）
 
 upstream:
   # 默认直连 Grok Build CLI 代理；留空或省略等同该地址

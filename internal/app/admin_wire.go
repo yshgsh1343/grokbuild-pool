@@ -47,74 +47,80 @@ func wireAdmin(cfg config.Config, pool *poolStack, up *upstreamStack, metrics *h
 	prefixes := append([]string(nil), anth.PassthroughPrefixes...)
 	sso := cfg.Imports.SSOConverter
 	rt := admin.RuntimeSettings{
-		SelectorStrategy:            cfg.Selector.Strategy,
-		HotSize:                     cfg.HotSize,
-		MaxInflightPerAccount:       pool.MaxInflight,
-		StickyTTLSec:                cfg.Selector.StickyTTLSec,
-		StickyMax:                   cfg.Selector.StickyMax,
-		Pow2K:                       cfg.Selector.Pow2K,
-		WPriority:                   cfg.Selector.WPriority,
-		WInflight:                   cfg.Selector.WInflight,
-		WFailure:                    cfg.Selector.WFailure,
-		JitterAmp:                   cfg.Selector.JitterAmp,
-		SelectorMaxAttempts:         cfg.Selector.MaxAttempts,
-		MaxAttempts:                 cfg.Lease.MaxAttempts,
-		CooldownBaseSec:             cfg.Lease.CooldownBaseSec,
-		CooldownCapSec:              cfg.Lease.CooldownCapSec,
-		UnauthorizedCooldownSec:     cfg.Lease.UnauthorizedCooldownSec,
-		PaymentRequiredCooldownSec:  cfg.Lease.PaymentRequiredCooldownSec,
-		UnauthorizedQuarantineAfter: cfg.Lease.UnauthorizedQuarantineAfter,
-		ForbiddenCooldownSec:        cfg.Lease.ForbiddenCooldownSec,
-		ForbiddenQuarantineAfter:    cfg.Lease.ForbiddenQuarantineAfter,
-		CooldownJitterPct:           cfg.Lease.CooldownJitterPct,
-		CooldownExpMax:              4,
-		MaxConcurrent:               cfg.Limits.MaxConcurrent,
-		MaxBodyBytes:                cfg.Limits.MaxBodyBytes,
-		RequestTimeoutSec:           cfg.Limits.RequestTimeoutSec,
-		RefreshWorkers:              3,
-		RefreshQPS:                  30,
-		RefreshSkewSec:              300,
-		TokenDefaultRemainQuota:     1000,
-		TokenDefaultMaxConcurrent:   5,
-		TokenDefaultRPM:             0,
-		TokenDefaultUnlimited:       false,
-		ImportEnabled:               cfg.Imports.Enabled,
-		ImportMaxUploadBytes:        cfg.Imports.MaxUploadBytes,
-		ImportMaxEntries:            cfg.Imports.MaxEntries,
-		ImportMaxConcurrentJobs:     cfg.Imports.MaxConcurrentJobs,
-		ImportWorkers:               4,
-		ImportMaxNDJSONLineBytes:    cfg.Imports.MaxNDJSONLineBytes,
-		ImportMaxSSOValueBytes:      cfg.Imports.MaxSSOValueBytes,
-		ImportJobTimeoutSec:         cfg.Imports.JobTimeoutSec,
-		ImportStagingStaleAfterSec:  cfg.Imports.StagingStaleAfterSec,
-		ImportAllowServerPath:       cfg.Imports.AllowServerPath,
-		ImportSSOEndpoint:           sso.Endpoint,
-		ImportSSOAPIKeySet:          strings.TrimSpace(sso.Endpoint) != "" && strings.TrimSpace(sso.APIKey) != "",
-		ImportSSOMaxBatch:           sso.MaxBatch,
-		ImportSSOTimeoutSec:         sso.TimeoutSec,
-		ImportSSOAllowInsecure:      sso.AllowInsecure,
-		ImportSSOWorkers:            4,
-		AnthropicEnabled:            anth.Enabled,
-		AnthropicStripUnknownBetas:  anth.StripUnknownBetas,
-		AnthropicCountTokens:        anth.CountTokens,
+		AvailabilityMode:             cfg.AvailabilityMode,
+		SelectorStrategy:             cfg.Selector.Strategy,
+		HotSize:                      cfg.HotSize,
+		MaxInflightPerAccount:        pool.MaxInflight,
+		StickyTTLSec:                 cfg.Selector.StickyTTLSec,
+		StickyMax:                    cfg.Selector.StickyMax,
+		Pow2K:                        cfg.Selector.Pow2K,
+		WPriority:                    cfg.Selector.WPriority,
+		WInflight:                    cfg.Selector.WInflight,
+		WFailure:                     cfg.Selector.WFailure,
+		JitterAmp:                    cfg.Selector.JitterAmp,
+		SelectorMaxAttempts:          cfg.Selector.MaxAttempts,
+		MaxAttempts:                  cfg.Lease.MaxAttempts,
+		CooldownBaseSec:              cfg.Lease.CooldownBaseSec,
+		CooldownCapSec:               cfg.Lease.CooldownCapSec,
+		UnauthorizedCooldownSec:      cfg.Lease.UnauthorizedCooldownSec,
+		PaymentRequiredCooldownSec:   cfg.Lease.PaymentRequiredCooldownSec,
+		UnauthorizedQuarantineAfter:  cfg.Lease.UnauthorizedQuarantineAfter,
+		ForbiddenCooldownSec:         cfg.Lease.ForbiddenCooldownSec,
+		ForbiddenQuarantineAfter:     cfg.Lease.ForbiddenQuarantineAfter,
+		CooldownJitterPct:            cfg.Lease.CooldownJitterPct,
+		CooldownExpMax:               cfg.Lease.CooldownExpMax,
+		QuarantineOnPaymentRequired:  cfg.Lease.QuarantineOnPaymentRequired,
+		ClearStickyOn429:             cfg.Lease.ClearStickyOn429,
+		ClearStickyOn5xx:             cfg.Lease.ClearStickyOn5xx,
+		MaxConcurrent:                cfg.Limits.MaxConcurrent,
+		MaxBodyBytes:                 cfg.Limits.MaxBodyBytes,
+		RequestTimeoutSec:            cfg.Limits.RequestTimeoutSec,
+		RefreshWorkers:               3,
+		RefreshQPS:                   30,
+		RefreshSkewSec:               300,
+		TokenDefaultRemainQuota:      1000,
+		TokenDefaultMaxConcurrent:    5,
+		TokenDefaultRPM:              0,
+		TokenDefaultUnlimited:        false,
+		ImportEnabled:                cfg.Imports.Enabled,
+		ImportMaxUploadBytes:         cfg.Imports.MaxUploadBytes,
+		ImportMaxEntries:             cfg.Imports.MaxEntries,
+		ImportMaxConcurrentJobs:      cfg.Imports.MaxConcurrentJobs,
+		ImportWorkers:                4,
+		ImportMaxNDJSONLineBytes:     cfg.Imports.MaxNDJSONLineBytes,
+		ImportMaxSSOValueBytes:       cfg.Imports.MaxSSOValueBytes,
+		ImportJobTimeoutSec:          cfg.Imports.JobTimeoutSec,
+		ImportStagingStaleAfterSec:   cfg.Imports.StagingStaleAfterSec,
+		ImportAllowServerPath:        cfg.Imports.AllowServerPath,
+		ImportSSOEndpoint:            sso.Endpoint,
+		ImportSSOAPIKeySet:           strings.TrimSpace(sso.Endpoint) != "" && strings.TrimSpace(sso.APIKey) != "",
+		ImportSSOMaxBatch:            sso.MaxBatch,
+		ImportSSOTimeoutSec:          sso.TimeoutSec,
+		ImportSSOAllowInsecure:       sso.AllowInsecure,
+		ImportSSOWorkers:             4,
+		ImportCanaryHotSize:          0,
+		ImportCanaryHoldSec:          300,
+		AnthropicEnabled:             anth.Enabled,
+		AnthropicStripUnknownBetas:   anth.StripUnknownBetas,
+		AnthropicCountTokens:         anth.CountTokens,
 		AnthropicPassthroughPrefixes: prefixes,
-		AnthropicModelAliases:       aliases,
-		Listen:                      cfg.Listen,
-		AllowPublicListen:           cfg.AllowPublicListen,
-		DataDir:                     cfg.DataDir,
-		DBPath:                      pool.DBPath,
-		UpstreamBaseURL:             cfg.Upstream.BaseURL,
-		OAuthRefreshURL:             cfg.OAuth.RefreshURL,
-		OAuthClientID:               cfg.OAuth.ClientID,
-		APIKeyConfigured:            strings.TrimSpace(cfg.APIKey) != "",
-		AdminKeyConfigured:          strings.TrimSpace(cfg.AdminKey) != "",
-		LoggingLevel:                cfg.Logging.Level,
+		AnthropicModelAliases:        aliases,
+		Listen:                       cfg.Listen,
+		AllowPublicListen:            cfg.AllowPublicListen,
+		DataDir:                      cfg.DataDir,
+		DBPath:                       pool.DBPath,
+		UpstreamBaseURL:              cfg.Upstream.BaseURL,
+		OAuthRefreshURL:              cfg.OAuth.RefreshURL,
+		OAuthClientID:                cfg.OAuth.ClientID,
+		APIKeyConfigured:             strings.TrimSpace(cfg.APIKey) != "",
+		AdminKeyConfigured:           strings.TrimSpace(cfg.AdminKey) != "",
+		LoggingLevel:                 cfg.Logging.Level,
 	}
 
 	settingsPath := filepath.Join(cfg.DataDir, "settings.json")
 	settingsCtl := &admin.SettingsController{
-		Path:     settingsPath,
-		Hot:      pool.Hot,
+		Path: settingsPath,
+		Hot:  pool.Hot,
 		ReloadHot: func(newSize int) error {
 			if newSize > 0 && pool.Hot.Cap() != newSize {
 				pool.Hot.Resize(newSize)
@@ -185,6 +191,25 @@ func wireAdmin(cfg config.Config, pool *poolStack, up *upstreamStack, metrics *h
 			AllowServerPath:    cfg.Imports.AllowServerPath,
 			Converter:          ssoConverter,
 			AfterImport: func() error {
+				// 导入 canary：先只装一部分进热池，并短时抑制全量周期重载。
+				snap := settingsCtl.Snapshot().RuntimeSettings
+				canaryN := snap.ImportCanaryHotSize
+				holdSec := snap.ImportCanaryHoldSec
+				if holdSec <= 0 {
+					holdSec = 300
+				}
+				if canaryN > 0 && canaryN < pool.Hot.Cap() {
+					metas, err := pool.Catalog.ListEligible(canaryN, "")
+					if err != nil {
+						return err
+					}
+					if _, err := pool.Hot.LoadMetas(metas); err != nil {
+						return err
+					}
+					settingsCtl.MarkCanaryHold(holdSec)
+					logger.Info("import_canary_hot_loaded", "loaded", len(metas), "canary", canaryN, "hold_sec", holdSec)
+					return nil
+				}
 				_, err := pool.Hot.LoadEligible(pool.Catalog)
 				return err
 			},
@@ -292,6 +317,25 @@ func wireAdmin(cfg config.Config, pool *poolStack, up *upstreamStack, metrics *h
 			AllowServerPath:    in.ImportAllowServerPath,
 			Converter:          conv,
 			AfterImport: func() error {
+				// 导入 canary：先只装一部分进热池，并短时抑制全量周期重载。
+				snap := settingsCtl.Snapshot().RuntimeSettings
+				canaryN := snap.ImportCanaryHotSize
+				holdSec := snap.ImportCanaryHoldSec
+				if holdSec <= 0 {
+					holdSec = 300
+				}
+				if canaryN > 0 && canaryN < pool.Hot.Cap() {
+					metas, err := pool.Catalog.ListEligible(canaryN, "")
+					if err != nil {
+						return err
+					}
+					if _, err := pool.Hot.LoadMetas(metas); err != nil {
+						return err
+					}
+					settingsCtl.MarkCanaryHold(holdSec)
+					logger.Info("import_canary_hot_loaded", "loaded", len(metas), "canary", canaryN, "hold_sec", holdSec)
+					return nil
+				}
 				_, err := pool.Hot.LoadEligible(pool.Catalog)
 				return err
 			},
@@ -425,6 +469,12 @@ func mergeSettingsDefaults(loaded, base admin.RuntimeSettings) admin.RuntimeSett
 	}
 	if out.ImportSSOWorkers <= 0 {
 		out.ImportSSOWorkers = base.ImportSSOWorkers
+	}
+	if out.ImportCanaryHoldSec <= 0 {
+		out.ImportCanaryHoldSec = base.ImportCanaryHoldSec
+	}
+	if out.AvailabilityMode == "" {
+		out.AvailabilityMode = base.AvailabilityMode
 	}
 	if len(out.AnthropicModelAliases) == 0 {
 		out.AnthropicModelAliases = base.AnthropicModelAliases

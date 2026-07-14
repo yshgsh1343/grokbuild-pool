@@ -91,6 +91,9 @@ function loadDash(force) {
         card("刷新", String((s.refresh_ok_total || 0) + (s.refresh_fail_total || 0)),
           "OK " + (s.refresh_ok_total != null ? s.refresh_ok_total : 0) +
           " · Fail " + (s.refresh_fail_total != null ? s.refresh_fail_total : 0)) +
+        card("换号/熔断", String(s.pool_failover_total != null ? s.pool_failover_total : 0),
+          "failover " + (s.pool_failover_total != null ? s.pool_failover_total : 0) +
+          " · 429熔断 " + (s.pool_rate_limit_break_total != null ? s.pool_rate_limit_break_total : 0)) +
         "</div>";
     }
 

@@ -160,10 +160,14 @@ export function renderSettings() {
       s = s || {};
       var html = "";
       html += section("sel", "选号 / 热池", "策略/权重/粘性即时生效；热池大小保存后 Resize 并重建热集（大库重建可能要几秒）",
-        fieldSelect("策略", "sStrat", s.selector_strategy || "pow2_least_load", [
-          { v: "pow2_least_load", l: "pow2_least_load" },
-          { v: "sticky", l: "sticky" },
-          { v: "random", l: "random" }
+        fieldSelect("可用性模式", "sAvail", s.availability_mode || "stable", [
+          { v: "stable", l: "stable（求活）" },
+          { v: "balanced", l: "balanced" },
+          { v: "aggressive", l: "aggressive（冲吞吐）" }
+        ]) +
+        fieldSelect("策略", "sStrat", s.selector_strategy || "stable_rr", [
+          { v: "stable_rr", l: "stable_rr（最高优层轮询）" },
+          { v: "pow2_least_load", l: "pow2_least_load（吞吐）" }
         ]) +
         field("热池大小（保存后即时重建）", "sHot", s.hot_size) +
         field("单账号最大并发", "sMaxInf", s.max_inflight_per_account) +
@@ -186,7 +190,16 @@ export function renderSettings() {
         field("402 冷却秒", "sC402", s.payment_required_cooldown_sec) +
         field("401 隔离阈值", "sQ401", s.unauthorized_quarantine_after) +
         field("403 冷却秒", "sC403", s.forbidden_cooldown_sec) +
-        field("403 隔离阈值(0=关)", "sQ403", s.forbidden_quarantine_after)
+        field("403 隔离阈值(0=关)", "sQ403", s.forbidden_quarantine_after) +
+        fieldSelect("402 是否隔离", "sQPay", s.quarantine_on_payment_required ? "1" : "0", [
+          { v: "0", l: "否（默认）" }, { v: "1", l: "是" }
+        ]) +
+        fieldSelect("429 清粘性", "sClr429", s.clear_sticky_on_429 ? "1" : "0", [
+          { v: "0", l: "否（默认）" }, { v: "1", l: "是" }
+        ]) +
+        fieldSelect("5xx 清粘性", "sClr5xx", s.clear_sticky_on_5xx ? "1" : "0", [
+          { v: "0", l: "否（默认）" }, { v: "1", l: "是" }
+        ])
       );
       html += section("http", "进程限制 / HTTP", "全局并发、Body、超时立即生效",
         field("全局最大并发", "sGlob", s.max_concurrent) +
@@ -214,6 +227,8 @@ export function renderSettings() {
         field("最大条目(默认1万)", "sImpEnt", s.import_max_entries) +
         field("并发任务数", "sImpJobs", s.import_max_concurrent_jobs) +
         field("解析 workers", "sImpW", s.import_workers) +
+        field("导入 Canary 热池条数(0=全量)", "sImpCanary", s.import_canary_hot_size != null ? s.import_canary_hot_size : 0) +
+        field("Canary 抑制全量重载秒", "sImpHold", s.import_canary_hold_sec != null ? s.import_canary_hold_sec : 300) +
         field("NDJSON 行上限", "sImpNd", s.import_max_ndjson_line_bytes) +
         field("SSO 值上限", "sImpSsoB", s.import_max_sso_value_bytes) +
         field("任务超时秒", "sImpTO", s.import_job_timeout_sec) +
@@ -275,6 +290,7 @@ export function renderSettings() {
 
   $("saveSet").addEventListener("click", function () {
     var body = {
+      availability_mode: str("sAvail"),
       selector_strategy: str("sStrat"),
       hot_size: numI("sHot"),
       max_inflight_per_account: numI("sMaxInf"),
@@ -312,6 +328,8 @@ export function renderSettings() {
       import_max_entries: numI("sImpEnt"),
       import_max_concurrent_jobs: numI("sImpJobs"),
       import_workers: numI("sImpW"),
+      import_canary_hot_size: numI("sImpCanary"),
+      import_canary_hold_sec: numI("sImpHold"),
       import_max_ndjson_line_bytes: numI("sImpNd"),
       import_max_sso_value_bytes: numI("sImpSsoB"),
       import_job_timeout_sec: numI("sImpTO"),

@@ -18,9 +18,11 @@ type Metrics struct {
 	durationNanos atomic.Uint64
 
 	// 可选采样器填充的池 gauge（原子存储）。
-	hotSize      atomic.Int64
-	cooldownSize atomic.Int64
-	acquireFail  atomic.Uint64
+	hotSize        atomic.Int64
+	cooldownSize   atomic.Int64
+	acquireFail    atomic.Uint64
+	failoverTotal  atomic.Uint64
+	rateLimitBreak atomic.Uint64
 
 	// 刷新 / 隔离（后台 ticker 写入）。
 	refreshOK       atomic.Int64
@@ -92,6 +94,36 @@ func (m *Metrics) IncAcquireFail() {
 	if m != nil {
 		m.acquireFail.Add(1)
 	}
+}
+
+// IncFailover 记录一次跨账号故障切换。
+func (m *Metrics) IncFailover() {
+	if m != nil {
+		m.failoverTotal.Add(1)
+	}
+}
+
+// IncRateLimitBreak 记录 429 熔断提前返回。
+func (m *Metrics) IncRateLimitBreak() {
+	if m != nil {
+		m.rateLimitBreak.Add(1)
+	}
+}
+
+// FailoverTotal 供 admin pool/stats。
+func (m *Metrics) FailoverTotal() int64 {
+	if m == nil {
+		return 0
+	}
+	return int64(m.failoverTotal.Load())
+}
+
+// RateLimitBreakTotal 供 admin pool/stats。
+func (m *Metrics) RateLimitBreakTotal() int64 {
+	if m == nil {
+		return 0
+	}
+	return int64(m.rateLimitBreak.Load())
 }
 
 // Requests 返回累计请求数（管理仪表盘）。
@@ -196,4 +228,3 @@ func (m *Metrics) Handler() http.Handler {
 		)
 	})
 }
-

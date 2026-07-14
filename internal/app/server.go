@@ -51,6 +51,10 @@ func serveHTTP(cfg config.Config, pool *poolStack, up *upstreamStack, adm *admin
 	metrics := &httpserver.Metrics{}
 	st := pool.Hot.Stats(0)
 	metrics.SetPoolGauges(st.HotSize, st.CooldownCount)
+	if up != nil && up.Executor != nil {
+		up.Executor.OnFailover = metrics.IncFailover
+		up.Executor.OnRateLimitBreak = metrics.IncRateLimitBreak
+	}
 
 	// admin 已创建时 Metrics 可能尚未挂上：补挂
 	if adm.Handlers != nil {
@@ -115,6 +119,10 @@ func serveHTTP(cfg config.Config, pool *poolStack, up *upstreamStack, adm *admin
 			case <-stopBG:
 				return
 			case <-t.C:
+				if adm.Settings != nil && adm.Settings.CanaryHoldActive() {
+					logger.Info("hot_reload_skipped_canary_hold")
+					continue
+				}
 				n, err := pool.Hot.LoadEligible(pool.Catalog)
 				if err != nil {
 					logger.Warn("hot_reload_failed", "error", err)

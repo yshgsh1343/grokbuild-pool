@@ -21,10 +21,10 @@ import (
 
 // adminAuthLimiter 进程内管理鉴权失败限速（按客户端 IP）。
 type adminAuthLimiter struct {
-	mu      sync.Mutex
-	fails   map[string]*adminAuthWindow
-	limit   int
-	window  time.Duration
+	mu     sync.Mutex
+	fails  map[string]*adminAuthWindow
+	limit  int
+	window time.Duration
 }
 
 type adminAuthWindow struct {

@@ -20,6 +20,7 @@ import (
 // 能热更的即时生效；仅 listen/data_dir/db_path 等绑定项需重启，其余均持久化并可热更。
 type RuntimeSettings struct {
 	// —— 选号 / 热池 ——
+	AvailabilityMode      string  `json:"availability_mode"`
 	SelectorStrategy      string  `json:"selector_strategy"`
 	HotSize               int     `json:"hot_size"`
 	MaxInflightPerAccount int32   `json:"max_inflight_per_account"`
@@ -43,6 +44,9 @@ type RuntimeSettings struct {
 	ForbiddenQuarantineAfter    int   `json:"forbidden_quarantine_after"`
 	CooldownJitterPct           int   `json:"cooldown_jitter_pct"`
 	CooldownExpMax              int   `json:"cooldown_exp_max"`
+	QuarantineOnPaymentRequired bool  `json:"quarantine_on_payment_required"`
+	ClearStickyOn429            bool  `json:"clear_sticky_on_429"`
+	ClearStickyOn5xx            bool  `json:"clear_sticky_on_5xx"`
 
 	// —— 进程限制 ——
 	MaxConcurrent     int   `json:"max_concurrent"`
@@ -72,12 +76,16 @@ type RuntimeSettings struct {
 	ImportStagingStaleAfterSec int    `json:"import_staging_stale_after_sec"`
 	ImportAllowServerPath      bool   `json:"import_allow_server_path"`
 	ImportSSOEndpoint          string `json:"import_sso_endpoint"`
-	ImportSSOAPIKeySet         bool   `json:"import_sso_api_key_set"` // 只读展示
+	ImportSSOAPIKeySet         bool   `json:"import_sso_api_key_set"`       // 只读展示
 	ImportSSOAPIKey            string `json:"import_sso_api_key,omitempty"` // 仅 PUT 写入，GET 不回传明文
 	ImportSSOMaxBatch          int    `json:"import_sso_max_batch"`
 	ImportSSOTimeoutSec        int    `json:"import_sso_timeout_sec"`
 	ImportSSOAllowInsecure     bool   `json:"import_sso_allow_insecure"`
 	ImportSSOWorkers           int    `json:"import_sso_workers"`
+	// ImportCanaryHotSize 导入后先只装入热池的账号数；0=全量。保存后下次导入生效。
+	ImportCanaryHotSize int `json:"import_canary_hot_size"`
+	// ImportCanaryHoldSec 导入 canary 后禁止周期全量热重载的秒数；0=不抑制。
+	ImportCanaryHoldSec int `json:"import_canary_hold_sec"`
 
 	// —— Anthropic / 模型别名（热更）——
 	AnthropicEnabled             bool              `json:"anthropic_enabled"`
@@ -97,12 +105,69 @@ type RuntimeSettings struct {
 	APIKeyConfigured   bool   `json:"api_key_configured"`
 	AdminKeyConfigured bool   `json:"admin_key_configured"`
 	// 可选写入新密钥（GET 永不回传明文）
-	APIKey   string `json:"api_key,omitempty"`
-	AdminKey string `json:"admin_key,omitempty"`
+	APIKey       string `json:"api_key,omitempty"`
+	AdminKey     string `json:"admin_key,omitempty"`
 	LoggingLevel string `json:"logging_level"`
 
 	// RestartHint 非空时提示哪些变更需重启
 	RestartHint string `json:"restart_hint,omitempty"`
+}
+
+// expandAvailabilityMode fills zero fields from mode presets (admin PUT helper).
+func expandAvailabilityMode(in *RuntimeSettings) {
+	if in == nil {
+		return
+	}
+	mode := strings.ToLower(strings.TrimSpace(in.AvailabilityMode))
+	if mode == "" {
+		return
+	}
+	switch mode {
+	case "stable":
+		if in.SelectorStrategy == "" {
+			in.SelectorStrategy = "stable_rr"
+		}
+		if in.MaxInflightPerAccount == 0 {
+			in.MaxInflightPerAccount = 1
+		}
+		if in.MaxAttempts == 0 {
+			in.MaxAttempts = 2
+		}
+		if in.SelectorMaxAttempts == 0 {
+			in.SelectorMaxAttempts = 2
+		}
+		if in.MaxConcurrent == 0 {
+			in.MaxConcurrent = 60
+		}
+	case "balanced":
+		if in.SelectorStrategy == "" {
+			in.SelectorStrategy = "stable_rr"
+		}
+		if in.MaxInflightPerAccount == 0 {
+			in.MaxInflightPerAccount = 2
+		}
+		if in.MaxAttempts == 0 {
+			in.MaxAttempts = 3
+		}
+		if in.MaxConcurrent == 0 {
+			in.MaxConcurrent = 80
+		}
+	case "aggressive":
+		if in.SelectorStrategy == "" {
+			in.SelectorStrategy = "pow2_least_load"
+		}
+		if in.MaxInflightPerAccount == 0 {
+			in.MaxInflightPerAccount = 4
+		}
+		if in.MaxAttempts == 0 {
+			in.MaxAttempts = 6
+		}
+		if in.MaxConcurrent == 0 {
+			in.MaxConcurrent = 120
+		}
+		in.QuarantineOnPaymentRequired = true
+		in.ClearStickyOn429 = true
+	}
 }
 
 // SettingsSnapshot 为 GET 响应：运行时设置 + 可选持久化路径。
@@ -120,12 +185,12 @@ type SettingsController struct {
 	// Path 持久化文件路径（如 data/settings.json）；空则不落盘。
 	Path string
 
-	Hot      *hot.Index
+	Hot *hot.Index
 	// ReloadHot 可选：hot_size 变更后按新容量重建热集（通常 LoadEligible）。
 	ReloadHot func(newSize int) error
-	Lease    *lease.Manager
-	Selector *selector.Selector
-	Refresh  *refresh.Service
+	Lease     *lease.Manager
+	Selector  *selector.Selector
+	Refresh   *refresh.Service
 	// SetGlobalMaxConcurrent 可选：更新 HTTP 全局并发（0 = 不限制）
 	SetGlobalMaxConcurrent func(n int)
 	// SetMaxBodyBytes 可选：热更新请求体上限（0 = 不限制）
@@ -149,6 +214,8 @@ type SettingsController struct {
 	ProcessInfo RuntimeSettings
 	// lastSSOAPIKey 仅内存，供 ApplyImport 在 PUT 未传新 key 时复用
 	lastSSOAPIKey string
+	// CanaryHoldUntil unix 秒；>now 时周期热重载跳过全量装载。
+	CanaryHoldUntil int64
 }
 
 // SeedSecrets 启动时注入配置文件中的密钥（不落盘、GET 不回传）。
@@ -187,6 +254,26 @@ func (c *SettingsController) PeekAdminKey() string {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 	return c.storedAdminKey
+}
+
+// MarkCanaryHold 设置导入 canary 抑制全量热重载窗口。
+func (c *SettingsController) MarkCanaryHold(holdSec int) {
+	if c == nil || holdSec <= 0 {
+		return
+	}
+	c.mu.Lock()
+	c.CanaryHoldUntil = time.Now().Unix() + int64(holdSec)
+	c.mu.Unlock()
+}
+
+// CanaryHoldActive 报告是否仍在 canary hold 窗口。
+func (c *SettingsController) CanaryHoldActive() bool {
+	if c == nil {
+		return false
+	}
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.CanaryHoldUntil > time.Now().Unix()
 }
 
 // PeekAPIKey 返回当前内存中的静态 API key。

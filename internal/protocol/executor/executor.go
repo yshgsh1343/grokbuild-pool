@@ -74,6 +74,10 @@ type Executor struct {
 	RequestID func(context.Context) string
 	// OnDialError 连接错误时回调，便于 ForgetAccount / 标记代理（P1.5）。
 	OnDialError func(accountID, proxyURL string, err error)
+	// OnFailover 跨账号切换时回调（attempt>1）。
+	OnFailover func()
+	// OnRateLimitBreak 429 熔断提前返回时回调。
+	OnRateLimitBreak func()
 
 	// acquireCount 为测试埋点（可选）。
 	mu           sync.Mutex
@@ -330,6 +334,9 @@ func (e *Executor) Post(ctx context.Context, model, convID string, body []byte, 
 						"attempt", attempt,
 						"failovers", rateLimitFailovers,
 					)
+					if e.OnRateLimitBreak != nil {
+						e.OnRateLimitBreak()
+					}
 					return buffered, nil
 				}
 			}
@@ -365,6 +372,9 @@ func (e *Executor) Post(ctx context.Context, model, convID string, body []byte, 
 						"attempt", attempt,
 						"failovers", rateLimitFailovers,
 					)
+					if e.OnRateLimitBreak != nil {
+						e.OnRateLimitBreak()
+					}
 					return buffered, nil
 				}
 			}
