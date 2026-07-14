@@ -86,12 +86,18 @@ func New(cat *catalog.Catalog, idx *hot.Index, sel *selector.Selector, cfg Confi
 	if cat == nil || idx == nil || sel == nil {
 		panic("lease: nil catalog, hot index, or selector")
 	}
-	return &Manager{
-		cat: cat,
-		idx: idx,
-		sel: sel,
-		cfg: cfg.normalize(),
+	m := &Manager{
+		cat:       cat,
+		idx:       idx,
+		sel:       sel,
+		cfg:       cfg.normalize(),
+		modelCool: make(map[string]map[string]int64),
 	}
+	// 启动时装载未过期模型冷却（失败不阻断）
+	if loaded, err := cat.LoadActiveModelCooldowns(time.Now().Unix()); err == nil && len(loaded) > 0 {
+		m.modelCool = loaded
+	}
+	return m
 }
 
 // Config 返回当前配置副本。
@@ -349,7 +355,7 @@ func (m *Manager) releaseFailure(lease Lease, result Result, now int64) error {
 		until := now + coolSec
 		// 429 + 有 model：优先模型级冷却，不连坐整号（除非显式无 model）
 		if code == 429 && strings.TrimSpace(lease.Model) != "" {
-			m.setModelCooldown(lease.AccountID, lease.Model, until)
+			m.setModelCooldownErr(lease.AccountID, lease.Model, until, lastErr)
 			// 不写账号级 cooldown_until；仍记 failure/last_error
 		} else {
 			patch.CooldownUntil = &until
@@ -512,11 +518,14 @@ func (m *Manager) cooldownSeconds(statusCode int, retryAfter time.Duration, fail
 }
 
 func (m *Manager) setModelCooldown(accountID, model string, until int64) {
+	m.setModelCooldownErr(accountID, model, until, "")
+}
+
+func (m *Manager) setModelCooldownErr(accountID, model string, until int64, lastErr string) {
 	if m == nil || accountID == "" || model == "" || until <= 0 {
 		return
 	}
 	m.modelMu.Lock()
-	defer m.modelMu.Unlock()
 	if m.modelCool == nil {
 		m.modelCool = make(map[string]map[string]int64)
 	}
@@ -526,6 +535,11 @@ func (m *Manager) setModelCooldown(accountID, model string, until int64) {
 		m.modelCool[accountID] = mm
 	}
 	mm[model] = until
+	m.modelMu.Unlock()
+	// 持久化；失败仅忽略（内存仍生效）
+	if m.cat != nil {
+		_ = m.cat.UpsertModelCooldown(accountID, model, until, lastErr)
+	}
 }
 
 func (m *Manager) modelCooldownActive(accountID, model string, now int64) bool {
@@ -560,4 +574,54 @@ func (m *Manager) ModelCooldownUntil(accountID, model string) int64 {
 		return 0
 	}
 	return m.modelCool[accountID][model]
+}
+
+// ListModelCooldowns 返回账号模型冷却（优先内存，合并 DB）。
+func (m *Manager) ListModelCooldowns(accountID string) []catalog.ModelCooldown {
+	if m == nil {
+		return nil
+	}
+	now := time.Now().Unix()
+	out := []catalog.ModelCooldown{}
+	// memory snapshot
+	m.modelMu.Lock()
+	if accountID != "" {
+		if mm := m.modelCool[accountID]; mm != nil {
+			for model, until := range mm {
+				if until > now {
+					out = append(out, catalog.ModelCooldown{AccountID: accountID, Model: model, CooldownUntil: until, RemainingSec: until - now})
+				}
+			}
+		}
+	} else {
+		for acc, mm := range m.modelCool {
+			for model, until := range mm {
+				if until > now {
+					out = append(out, catalog.ModelCooldown{AccountID: acc, Model: model, CooldownUntil: until, RemainingSec: until - now})
+				}
+			}
+		}
+	}
+	m.modelMu.Unlock()
+	if m.cat != nil {
+		if dbRows, err := m.cat.ListModelCooldowns(accountID, now); err == nil {
+			// merge by account+model, prefer later until
+			idx := map[string]int{}
+			for i, r := range out {
+				idx[r.AccountID+"|"+r.Model] = i
+			}
+			for _, r := range dbRows {
+				k := r.AccountID + "|" + r.Model
+				if i, ok := idx[k]; ok {
+					if r.CooldownUntil > out[i].CooldownUntil {
+						out[i] = r
+					}
+				} else {
+					out = append(out, r)
+					idx[k] = len(out) - 1
+				}
+			}
+		}
+	}
+	return out
 }

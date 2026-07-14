@@ -94,6 +94,10 @@ function loadDash(force) {
         card("换号/熔断", String(s.pool_failover_total != null ? s.pool_failover_total : 0),
           "failover " + (s.pool_failover_total != null ? s.pool_failover_total : 0) +
           " · 429熔断 " + (s.pool_rate_limit_break_total != null ? s.pool_rate_limit_break_total : 0)) +
+        card("Sticky 命中", (s.sticky_hit_rate != null ? ((Number(s.sticky_hit_rate)*100).toFixed(1)+"%") : "—"),
+          "主 " + (s.sticky_primary_hits != null ? s.sticky_primary_hits : 0) +
+          " · 次 " + (s.sticky_secondary_hits != null ? s.sticky_secondary_hits : 0) +
+          " · 重选 " + (s.sticky_reselects != null ? s.sticky_reselects : 0)) +
         "</div>";
     }
 

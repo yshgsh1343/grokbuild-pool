@@ -306,6 +306,8 @@ function loadAccounts(opts) {
         "<td>" + esc(String(a.priority != null ? a.priority : 0)) + "</td>" +
         '<td class="mono" title="' + esc(proxy) + '">' + esc(proxy) + "</td>" +
         '<td class="actions">' +
+        '<button type="button" class="btn btn-sm btn-secondary" data-act="detail" data-id="' +
+          esc(a.id) + '">详情</button>' +
         '<button type="button" class="btn btn-sm btn-secondary" data-act="probe" data-id="' +
           esc(a.id) + '">测活</button>' +
         (a.enabled
@@ -347,6 +349,29 @@ function loadAccounts(opts) {
         var act = btn.getAttribute("data-act");
         if (!id) return;
 
+        if (act === "detail") {
+          withButtonLoading(btn, function () {
+            return api("/admin/accounts/" + encodeURIComponent(id) + "/model-cooldowns").then(function (res) {
+              var rows = (res && res.model_cooldowns) || [];
+              if (!rows.length) {
+                toast("账号 " + id + " 当前无模型冷却", "success");
+                return;
+              }
+              var lines = rows.map(function (r) {
+                var left = r.remaining_sec != null ? r.remaining_sec : 0;
+                var unit = left < 60 ? (left + "s") : (left < 3600 ? (Math.ceil(left/60) + "m") : (Math.ceil(left/3600) + "h"));
+                return (r.model || "?") + " · 剩余 " + unit + (r.last_error ? (" · " + r.last_error) : "");
+              });
+              toast("模型冷却 " + id + "：
+" + lines.join("
+"), "warning");
+            }).catch(function (e) {
+              if (handleAuthError(e)) return;
+              toast(e.message || "加载模型冷却失败", "danger");
+            });
+          }, { loadingText: "加载…" });
+          return;
+        }
         if (act === "probe") {
           withButtonLoading(btn, function () {
             return api("/admin/accounts/" + encodeURIComponent(id) + "/probe", {

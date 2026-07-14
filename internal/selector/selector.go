@@ -3,6 +3,7 @@ package selector
 import (
 	"math/rand"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/yshgsh1343/grokbuild2api/internal/catalog"
@@ -25,6 +26,11 @@ type Selector struct {
 	// rrMu 保护 stable_rr 游标。
 	rrMu     sync.Mutex
 	rrCursor uint64
+
+	// sticky 命中统计（原子）。
+	stickyPrimaryHits   atomic.Uint64
+	stickySecondaryHits atomic.Uint64
+	stickyReselects     atomic.Uint64
 }
 
 // New 基于给定热索引构建 Selector。
@@ -102,6 +108,7 @@ func (s *Selector) PickExcluding(now int64, stickyKey string, exclude map[string
 			stickyPrimary, stickySecondary = p, sec
 			if p != "" && !excluded(exclude, p) {
 				if m, found := s.idx.Get(p); found && s.idx.EligibleMeta(m, now) {
+					s.stickyPrimaryHits.Add(1)
 					return p, true
 				}
 			}
@@ -109,6 +116,7 @@ func (s *Selector) PickExcluding(now int64, stickyKey string, exclude map[string
 				if m, found := s.idx.Get(sec); found && s.idx.EligibleMeta(m, now) {
 					// secondary 顶上时提升为 primary，旧 primary 仍可保留为 secondary
 					sticky.put(now, stickyKey, sec)
+					s.stickySecondaryHits.Add(1)
 					return sec, true
 				}
 			}
@@ -128,9 +136,9 @@ func (s *Selector) PickExcluding(now int64, stickyKey string, exclude map[string
 	if stickyKey != "" {
 		// 新选号写入 primary；若已有不同旧主号，sticky.put 会自动降为 secondary
 		sticky.put(now, stickyKey, id)
-		// 若 primary 失效后直接选到新号，且存在旧 secondary 与新号不同，保持原 secondary
-		_ = stickyPrimary
-		_ = stickySecondary
+		if stickyPrimary != "" || stickySecondary != "" {
+			s.stickyReselects.Add(1)
+		}
 	}
 	return id, true
 }
@@ -309,4 +317,12 @@ func excluded(exclude map[string]struct{}, id string) bool {
 	}
 	_, ok := exclude[id]
 	return ok
+}
+
+// StickyStats 返回 sticky primary/secondary 命中与重选计数。
+func (s *Selector) StickyStats() (primaryHits, secondaryHits, reselects uint64) {
+	if s == nil {
+		return 0, 0, 0
+	}
+	return s.stickyPrimaryHits.Load(), s.stickySecondaryHits.Load(), s.stickyReselects.Load()
 }

@@ -48,6 +48,15 @@ CREATE TABLE IF NOT EXISTS accounts (
 CREATE INDEX IF NOT EXISTS idx_accounts_eligible ON accounts(enabled, lifecycle, cooldown_until, priority);
 CREATE INDEX IF NOT EXISTS idx_accounts_expires ON accounts(expires_at);
 CREATE INDEX IF NOT EXISTS idx_accounts_identity ON accounts(identity_key);
+CREATE TABLE IF NOT EXISTS model_cooldowns (
+  account_id TEXT NOT NULL,
+  model TEXT NOT NULL,
+  cooldown_until INTEGER NOT NULL,
+  last_error TEXT,
+  updated_at INTEGER NOT NULL,
+  PRIMARY KEY(account_id, model)
+);
+CREATE INDEX IF NOT EXISTS idx_model_cooldowns_until ON model_cooldowns(cooldown_until);
 `
 )
 
@@ -119,6 +128,7 @@ func (c *Catalog) migrate() error {
 	if err := c.ensureColumn("accounts", "success_count", "INTEGER NOT NULL DEFAULT 0"); err != nil {
 		return err
 	}
+	// model_cooldowns 表由 schemaSQL 创建；旧库 Exec schema 会 IF NOT EXISTS。
 	return nil
 }
 
@@ -1357,4 +1367,130 @@ func accountStatusReason(s AccountSummary, now int64) string {
 		return "可用"
 	}
 	return "不可用"
+}
+
+// ModelCooldown 账号-模型冷却行。
+type ModelCooldown struct {
+	AccountID     string `json:"account_id"`
+	Model         string `json:"model"`
+	CooldownUntil int64  `json:"cooldown_until"`
+	LastError     string `json:"last_error,omitempty"`
+	UpdatedAt     int64  `json:"updated_at"`
+	RemainingSec  int64  `json:"remaining_sec,omitempty"`
+}
+
+// UpsertModelCooldown 写入/更新模型冷却。
+func (c *Catalog) UpsertModelCooldown(accountID, model string, until int64, lastErr string) error {
+	if c == nil || c.db == nil {
+		return ErrClosed
+	}
+	accountID = strings.TrimSpace(accountID)
+	model = strings.TrimSpace(model)
+	if accountID == "" || model == "" || until <= 0 {
+		return fmt.Errorf("%w: model cooldown args", ErrInvalidInput)
+	}
+	now := time.Now().Unix()
+	_, err := c.db.Exec(`
+INSERT INTO model_cooldowns(account_id, model, cooldown_until, last_error, updated_at)
+VALUES(?,?,?,?,?)
+ON CONFLICT(account_id, model) DO UPDATE SET
+  cooldown_until=excluded.cooldown_until,
+  last_error=excluded.last_error,
+  updated_at=excluded.updated_at
+`, accountID, model, until, lastErr, now)
+	if err != nil {
+		return fmt.Errorf("catalog: upsert model cooldown: %w", err)
+	}
+	return nil
+}
+
+// ClearModelCooldown 删除一条模型冷却。
+func (c *Catalog) ClearModelCooldown(accountID, model string) error {
+	if c == nil || c.db == nil {
+		return ErrClosed
+	}
+	_, err := c.db.Exec(`DELETE FROM model_cooldowns WHERE account_id=? AND model=?`, accountID, model)
+	if err != nil {
+		return fmt.Errorf("catalog: clear model cooldown: %w", err)
+	}
+	return nil
+}
+
+// ListModelCooldowns 列出账号当前未过期模型冷却；accountID 空则全表活跃冷却。
+func (c *Catalog) ListModelCooldowns(accountID string, now int64) ([]ModelCooldown, error) {
+	if c == nil || c.db == nil {
+		return nil, ErrClosed
+	}
+	if now <= 0 {
+		now = time.Now().Unix()
+	}
+	var (
+		rows *sql.Rows
+		err  error
+	)
+	if strings.TrimSpace(accountID) == "" {
+		rows, err = c.db.Query(`
+SELECT account_id, model, cooldown_until, COALESCE(last_error,''), updated_at
+FROM model_cooldowns
+WHERE cooldown_until > ?
+ORDER BY cooldown_until DESC, account_id, model
+LIMIT 5000`, now)
+	} else {
+		rows, err = c.db.Query(`
+SELECT account_id, model, cooldown_until, COALESCE(last_error,''), updated_at
+FROM model_cooldowns
+WHERE account_id=? AND cooldown_until > ?
+ORDER BY cooldown_until DESC, model
+LIMIT 500`, accountID, now)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("catalog: list model cooldowns: %w", err)
+	}
+	defer rows.Close()
+	out := make([]ModelCooldown, 0, 16)
+	for rows.Next() {
+		var m ModelCooldown
+		if err := rows.Scan(&m.AccountID, &m.Model, &m.CooldownUntil, &m.LastError, &m.UpdatedAt); err != nil {
+			return nil, err
+		}
+		if m.CooldownUntil > now {
+			m.RemainingSec = m.CooldownUntil - now
+		}
+		out = append(out, m)
+	}
+	return out, rows.Err()
+}
+
+// LoadActiveModelCooldowns 返回 map[account]map[model]until，供 lease 启动装载。
+func (c *Catalog) LoadActiveModelCooldowns(now int64) (map[string]map[string]int64, error) {
+	rows, err := c.ListModelCooldowns("", now)
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[string]map[string]int64)
+	for _, r := range rows {
+		mm := out[r.AccountID]
+		if mm == nil {
+			mm = make(map[string]int64)
+			out[r.AccountID] = mm
+		}
+		mm[r.Model] = r.CooldownUntil
+	}
+	return out, nil
+}
+
+// PurgeExpiredModelCooldowns 清理过期行。
+func (c *Catalog) PurgeExpiredModelCooldowns(now int64) (int64, error) {
+	if c == nil || c.db == nil {
+		return 0, ErrClosed
+	}
+	if now <= 0 {
+		now = time.Now().Unix()
+	}
+	res, err := c.db.Exec(`DELETE FROM model_cooldowns WHERE cooldown_until <= ?`, now)
+	if err != nil {
+		return 0, err
+	}
+	n, _ := res.RowsAffected()
+	return n, nil
 }

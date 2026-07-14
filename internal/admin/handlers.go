@@ -146,6 +146,10 @@ type Handlers struct {
 	Settings  *SettingsController
 	// Catalog 冷存储（账号列表 / 启停）；可空则相关路由 503。
 	Catalog *catalog.Catalog
+	// Lease 可选：模型冷却查询。
+	Lease interface {
+		ListModelCooldowns(accountID string) []catalog.ModelCooldown
+	}
 	// AccountHot 热池同步（启停账号）；可空则只改冷存储。
 	AccountHot AccountHot
 	// Outbound 出站工厂（账号测活 /billing）；可空则测活路由 503。
@@ -231,6 +235,7 @@ func (h *Handlers) Mount(mux *http.ServeMux) {
 	mux.HandleFunc("POST /admin/accounts/batch", h.RequireAdmin(h.BatchAccounts))
 	mux.HandleFunc("POST /admin/accounts/probe", h.RequireAdmin(h.BatchProbeAccounts))
 	mux.HandleFunc("POST /admin/accounts/{id}/probe", h.RequireAdmin(h.ProbeAccount))
+	mux.HandleFunc("GET /admin/accounts/{id}/model-cooldowns", h.RequireAdmin(h.ListAccountModelCooldowns))
 	mux.HandleFunc("POST /admin/accounts/{id}/disable", h.RequireAdmin(h.DisableAccount))
 	mux.HandleFunc("POST /admin/accounts/{id}/enable", h.RequireAdmin(h.EnableAccount))
 	mux.HandleFunc("PATCH /admin/accounts/{id}", h.RequireAdmin(h.PatchAccountProxy))
@@ -597,4 +602,28 @@ func decodeJSON(r *http.Request, max int64, dst any) error {
 	dec := json.NewDecoder(io.LimitReader(r.Body, max))
 	dec.DisallowUnknownFields()
 	return dec.Decode(dst)
+}
+
+// ListAccountModelCooldowns GET /admin/accounts/{id}/model-cooldowns
+func (h *Handlers) ListAccountModelCooldowns(w http.ResponseWriter, r *http.Request) {
+	id := strings.TrimSpace(r.PathValue("id"))
+	if id == "" {
+		writeErr(w, http.StatusBadRequest, "missing id")
+		return
+	}
+	var rows []catalog.ModelCooldown
+	if h.Lease != nil {
+		rows = h.Lease.ListModelCooldowns(id)
+	} else if h.Catalog != nil {
+		var err error
+		rows, err = h.Catalog.ListModelCooldowns(id, 0)
+		if err != nil {
+			writeErr(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+	}
+	if rows == nil {
+		rows = []catalog.ModelCooldown{}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"account_id": id, "model_cooldowns": rows})
 }

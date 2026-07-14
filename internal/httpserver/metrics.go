@@ -18,11 +18,14 @@ type Metrics struct {
 	durationNanos atomic.Uint64
 
 	// 可选采样器填充的池 gauge（原子存储）。
-	hotSize        atomic.Int64
-	cooldownSize   atomic.Int64
-	acquireFail    atomic.Uint64
-	failoverTotal  atomic.Uint64
-	rateLimitBreak atomic.Uint64
+	hotSize             atomic.Int64
+	cooldownSize        atomic.Int64
+	acquireFail         atomic.Uint64
+	failoverTotal       atomic.Uint64
+	rateLimitBreak      atomic.Uint64
+	stickyPrimaryHits   atomic.Uint64
+	stickySecondaryHits atomic.Uint64
+	stickyReselects     atomic.Uint64
 
 	// 刷新 / 隔离（后台 ticker 写入）。
 	refreshOK       atomic.Int64
@@ -124,6 +127,35 @@ func (m *Metrics) RateLimitBreakTotal() int64 {
 		return 0
 	}
 	return int64(m.rateLimitBreak.Load())
+}
+
+// SetStickyStats 写入 sticky 命中统计（绝对值，非增量）。
+func (m *Metrics) SetStickyStats(primary, secondary, reselects uint64) {
+	if m == nil {
+		return
+	}
+	m.stickyPrimaryHits.Store(primary)
+	m.stickySecondaryHits.Store(secondary)
+	m.stickyReselects.Store(reselects)
+}
+
+func (m *Metrics) StickyPrimaryHits() int64 {
+	if m == nil {
+		return 0
+	}
+	return int64(m.stickyPrimaryHits.Load())
+}
+func (m *Metrics) StickySecondaryHits() int64 {
+	if m == nil {
+		return 0
+	}
+	return int64(m.stickySecondaryHits.Load())
+}
+func (m *Metrics) StickyReselects() int64 {
+	if m == nil {
+		return 0
+	}
+	return int64(m.stickyReselects.Load())
 }
 
 // Requests 返回累计请求数（管理仪表盘）。
